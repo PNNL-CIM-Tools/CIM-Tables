@@ -1,0 +1,32 @@
+[project]
+name = "cimtables"
+version = "0.1.0a0"
+description = "The .cimtbl DSL: parser, profile-reflective validator, and graph-write/binder core for cim-graph"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "cim-graph>=0.6.0a0",
+    "cimprofiles>=0.1.0a4",
+    "lark>=1.1.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.5",
+    "pre-commit>=2.17.0",
+]
+
+[tool.uv]
+# cim-graph and its deps (gridappsd-python) are pre-release builds
+prerelease = "allow"
+
+[tool.uv.sources]
+cim-graph = { path = "/home/ande188/CIM-Graph", editable = true }
+cimprofiles = { path = "/home/ande188/CIM-Profiles", editable = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cimtables"]
