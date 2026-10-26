@@ -185,7 +185,8 @@ def _row_dataclass(row_cls_name: str, profile: str) -> type:
     fields: list[tuple[str, Any, dataclasses.Field]] = [
         ('name', str, dataclasses.field()),
     ]
-    for field_name, (kind, extra) in _real_fields(cim_cls, cim_module).items():
+    real_fields = _real_fields(cim_cls, cim_module)
+    for field_name, (kind, extra) in real_fields.items():
         if kind == _FieldKind.QUANTITY:
             field_type = Qty
         elif kind == _FieldKind.REFERENCE:
@@ -194,6 +195,10 @@ def _row_dataclass(row_cls_name: str, profile: str) -> type:
             field_type = extra
         fields.append((field_name, field_type | None, dataclasses.field(default=None)))
     for col_name, col_type in synthetic.SYNTHETIC_COLUMNS.items():
+        # A real CIM attribute wins over the DSL shorthand of the same name
+        # (Terminal.phases is a PhaseCode, not the phase-children string)
+        if col_name in real_fields:
+            continue
         fields.append((col_name, col_type | None, dataclasses.field(default=None)))
     fields.append(('source_file', str, dataclasses.field(default='')))
     fields.append(('source_line', int, dataclasses.field(default=0)))

@@ -31,7 +31,7 @@ from cimgraph.data_profile.units.units import CIMUnit
 from cimgraph.models import GraphModel
 
 from cimtables.name_index import NameIndex
-from cimtables.units import Qty
+from cimtables.units import Qty, relative_to_ohm
 
 
 def _cim_unit_type(obj: object, attr: str) -> type[CIMUnit] | None:
@@ -69,8 +69,14 @@ def _part_field(part: ModuleType, obj: object, attr: str) -> dataclasses.Field:
         ) from None
 
 
-def set_attr(obj: object, part: ModuleType, attr: str, value: object) -> None:
+def set_attr(obj: object, part: ModuleType, attr: str, value: object, *,
+             z_base: float | None = None) -> None:
     """Set a plain scalar or Qty onto a live cim-graph object's attribute.
+
+    A pu/percent Qty on an ohm-typed attribute (r, x, r0, ...) is converted
+    to ohms against `z_base` (ohms, resolved by the caller); raises if none
+    was given. Relative Qtys on non-impedance attributes (PerCent) pass
+    through unchanged.
 
     Raises ValueError if `attr` is not a real field of part's same-named
     class, or if it IS a field but an association (has metadata['inverse'])
@@ -93,6 +99,14 @@ def set_attr(obj: object, part: ModuleType, attr: str, value: object) -> None:
                 f"{type(obj).__name__}.{attr} is not a CIMUnit-typed attribute, "
                 f"but got a Qty ({value!r})"
             )
+        if value.is_relative() and cim_unit_type(0).unit.name == 'ohm':
+            if z_base is None:
+                raise ValueError(
+                    f"{type(obj).__name__}.{attr}: {value.unit!r} impedance needs a z_base, "
+                    f"but none could be resolved for {getattr(obj, 'name', obj)!r}"
+                )
+            setattr(obj, attr, cim_unit_type(relative_to_ohm(value, z_base), 'ohm'))
+            return
         if value.unit:
             setattr(obj, attr, cim_unit_type(value.value, value.unit))
         else:

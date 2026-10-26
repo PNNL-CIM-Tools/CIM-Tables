@@ -102,3 +102,64 @@ def test_duplicate_name_same_class_raises(network):
     duplicate = cim.BaseVoltage(name='base_115', mRID='not-the-same-object')
     with pytest.raises(ValueError, match=r"duplicate name 'base_115'"):
         graph_write.add_to_graph(network, duplicate)
+
+
+def _bind_text(network, text):
+    records, _ = parser.parse_text(text, source_file='<test>')
+    return [bind_row(network, validate.validate(r)) for r in records]
+
+
+def test_fk_to_abstract_base_resolves_concrete_subclass(network):
+    # ACLineSegment.PerLengthImpedance's range is the abstract
+    # PerLengthImpedance; NameIndex keys the row under PerLengthPhaseImpedance
+    _bind_text(network, (
+        'Object PerLengthPhaseImpedance: name=mtx601, conductorCount=3\n'
+        'Object ACLineSegment: name=line_1, PerLengthImpedance=mtx601\n'
+    ))
+    line = graph_write.resolve(network, cim.ACLineSegment, 'line_1')
+    assert line.PerLengthImpedance is graph_write.resolve(network, cim.PerLengthPhaseImpedance, 'mtx601')
+
+
+def test_unresolved_fk_raises(network):
+    with pytest.raises(ValueError, match=r"PerLengthImpedance 'missing'.*not found"):
+        _bind_text(network, 'Object ACLineSegment: name=line_1, PerLengthImpedance=missing\n')
+
+
+_PERCENT_END = (
+    'Object PowerTransformerEnd: name=end_1, ratedU (V)=4160, ratedS (kVA)=500, r (percent)=1.1\n'
+)
+
+
+def test_percent_impedance_on_own_rating(network):
+    _bind_text(network, _PERCENT_END)
+    end = graph_write.resolve(network, cim.PowerTransformerEnd, 'end_1')
+    z_base = 4160 ** 2 / 500e3
+    assert end.r.to('ohm') == pytest.approx(0.011 * z_base)
+
+
+def test_percent_impedance_on_from_reference_rating(network):
+    _bind_text(network, _PERCENT_END + (
+        'Object TransformerMeshImpedance: name=mesh_1, FromTransformerEnd=end_1, x (percent)=2.0\n'
+    ))
+    mesh = graph_write.resolve(network, cim.TransformerMeshImpedance, 'mesh_1')
+    z_base = 4160 ** 2 / 500e3
+    assert mesh.x.to('ohm') == pytest.approx(0.02 * z_base)
+
+
+def test_percent_impedance_without_base_raises(network):
+    with pytest.raises(ValueError, match=r"'percent' impedance needs a z_base"):
+        _bind_text(network, 'Object TransformerMeshImpedance: name=mesh_1, x (percent)=2.0\n')
+
+
+def test_z_base_prefers_base_ratings_when_class_has_them():
+    # TransformerWinding-shaped: baseU = coil voltage, baseS = common tank kVA;
+    # ratedU is phase-to-phase and must not be used
+    from types import SimpleNamespace
+    from cimtables.binder import _winding_z_base
+    half_winding = SimpleNamespace(
+        baseU=cim.Voltage(120, 'V'), baseS=cim.ApparentPower(250, 'kVA'),
+        ratedU=cim.Voltage(240, 'V'), ratedS=cim.ApparentPower(125, 'kVA'))
+    assert _winding_z_base([half_winding]) == pytest.approx(120 ** 2 / 250e3)
+
+    half_winding.baseS = None  # no silent fallback to ratedS
+    assert _winding_z_base([half_winding]) is None

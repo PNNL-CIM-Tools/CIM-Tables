@@ -136,3 +136,10 @@ def test_comma_spec_merged_profile_validates(monkeypatch):
         assert 'BaseVoltage' in validate.reference_slots('EnergyConsumerRow')
     finally:
         get_cim_profile.cache_clear()
+
+
+def test_real_attribute_shadows_synthetic_column_of_same_name():
+    # Terminal.phases is a real PhaseCode attribute, not the DSL's
+    # phase-children shorthand string
+    row = validate.validate(_record('Terminal', {'name': 't1', 'phases': 'AB'}))
+    assert row.phases.value == 'AB'
