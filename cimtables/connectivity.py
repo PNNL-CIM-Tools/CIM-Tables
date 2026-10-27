@@ -55,27 +55,30 @@ def _resolve_node(network: GraphModel, col_name: str, node_name: str) -> object:
     return node_obj
 
 
+def _terminal_node_field(network: GraphModel, node_obj: object) -> str:
+    """The Terminal field a node/bus object attaches through."""
+    return 'ConnectivityNode' if isinstance(node_obj, network.cim.ConnectivityNode) else 'TopologicalNode'
+
+
 def _add_end_terminal(network: GraphModel, end: object, node_cols: dict[str, str]) -> object:
-    """A TransformerEnd row's node column: the Terminal belongs to the end's
+    """A TransformerEnd row's node (or bus) column: the Terminal belongs to the end's
     PowerTransformer (the ConductingEquipment), sequenceNumber = endNumber,
     and end.Terminal points at it. The PowerTransformer FK must already be set."""
     cim = network.cim
     if len(node_cols) != 1:
-        raise ValueError(f"{end.name!r}: a TransformerEnd takes exactly one node column, got {list(node_cols)}")
+        raise ValueError(f"{end.name!r}: a TransformerEnd takes exactly one node/bus column, got {list(node_cols)}")
     transformer = getattr(end, 'PowerTransformer', None)
     if transformer is None or end.endNumber is None:
-        raise ValueError(f"{end.name!r}: a node column on a TransformerEnd needs its PowerTransformer and endNumber")
+        raise ValueError(f"{end.name!r}: a node/bus column on a TransformerEnd needs its PowerTransformer and endNumber")
 
     [(col_name, node_name)] = node_cols.items()
-    if not col_name.startswith('node'):
-        raise ValueError(f"{end.name!r}: a TransformerEnd connects by node, not {col_name!r}")
     node_obj = _resolve_node(network, col_name, node_name)
     if transformer.EquipmentContainer is not None and node_obj.ConnectivityNodeContainer is None:
         graph_write.set_assc(node_obj, cim, 'ConnectivityNodeContainer', transformer.EquipmentContainer)
 
     terminal = cim.Terminal(name=f'{transformer.name}_T{end.endNumber}', sequenceNumber=end.endNumber)
     graph_write.set_assc(terminal, cim, 'ConductingEquipment', transformer)
-    graph_write.set_assc(terminal, cim, 'ConnectivityNode', node_obj)
+    graph_write.set_assc(terminal, cim, _terminal_node_field(network, node_obj), node_obj)
     graph_write.set_assc(end, cim, 'Terminal', terminal)
     graph_write.add_to_graph(network, terminal)
     return terminal
@@ -110,10 +113,7 @@ def add_connectivity(network: GraphModel, obj: object, *, node_cols: dict[str, s
         terminal = cim.Terminal(name=f'{obj.name}_T{i}', sequenceNumber=i)
         graph_write.set_assc(terminal, cim, 'ConductingEquipment', obj)
 
-        if isinstance(node_obj, cim.ConnectivityNode):
-            graph_write.set_assc(terminal, cim, 'ConnectivityNode', node_obj)
-        else:
-            graph_write.set_assc(terminal, cim, 'TopologicalNode', node_obj)
+        graph_write.set_assc(terminal, cim, _terminal_node_field(network, node_obj), node_obj)
 
         graph_write.add_to_graph(network, terminal)
         terminals.append(terminal)

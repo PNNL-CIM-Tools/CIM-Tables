@@ -85,3 +85,21 @@ def test_unnamed_rows_do_not_collide(network, cim):
     ))
     assert len(graph_write.resolve(network, cim.PerLengthPhaseImpedance, 'mtx605').PhaseImpedanceData) == 2
     assert len(bound) == 3
+
+
+def test_bus_column_wires_terminal_to_topological_node(network, cim):
+    _bind_text(network, (
+        'Object TopologicalNode: name=feeder_head_bus\n'
+        'Object EnergyConsumer: name=aggregate_load, bus=feeder_head_bus, p (kW)=3000\n'
+    ))
+    [terminal] = graph_write.resolve(network, cim.EnergyConsumer, 'aggregate_load').Terminals
+    assert terminal.TopologicalNode is graph_write.resolve(network, cim.TopologicalNode, 'feeder_head_bus')
+
+
+def test_transformer_end_bus_column_wires_topological_node(network, cim):
+    _bind_text(network, (
+        'Object PowerTransformer: name=sub3\n'
+        'Object PowerTransformerEnd: name=sub3_2, bus=650, endNumber=2, PowerTransformer=sub3\n'
+    ))
+    terminal = graph_write.resolve(network, cim.PowerTransformerEnd, 'sub3_2').Terminal
+    assert terminal.TopologicalNode is graph_write.resolve(network, cim.TopologicalNode, '650')

@@ -6,7 +6,7 @@ profile module (validate.py) instead of a curated allowlist."""
 
 SYNTHETIC_COLUMNS: dict[str, type] = {
     'node': str, 'node1': str, 'node2': str,
-    'bus1': str, 'bus2': str,
+    'bus': str, 'bus1': str, 'bus2': str,
     'phases': str,
     'Template': str,
 }
