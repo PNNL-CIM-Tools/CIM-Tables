@@ -5,10 +5,13 @@ bind_row is the one generic entry point from a validated <Class>Row to a live
 cim-graph object, for every class in the selected CIM profile - no per-class
 from_table/add_<part> dispatch table to maintain. Every row field is
 classified purely from the profile (validate.py), by name, into exactly one
-of three buckets:
+of these buckets:
 
 - a connectivity column (node*/bus*, per connectivity.py's naming rule) ->
   collected and passed to connectivity.add_connectivity in column order
+- the synthetic `phases` shorthand (only where the class has no real
+  `phases` attribute) -> connectivity.add_phase_children: Terminal.phases
+  plus <Class>Phase children (§3.6)
 - EquipmentContainer -> resolved via resolve_any_subclass (its range is
   always an abstract base: Feeder, Substation, ... - see validate.py's
   reference_target_class) and passed to add_connectivity as the container
@@ -46,6 +49,7 @@ from cimtables.units import Qty
 _SKIP_FIELDS = {'name', 'source_file', 'source_line'}
 _CONTAINER_FIELD = 'EquipmentContainer'
 _FROM_PREFIX = 'From'
+_PHASES_FIELD = 'phases'
 
 
 def _rating(obj: object, attr: str, unit: str) -> float | None:
@@ -87,6 +91,7 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
         obj = getattr(network.cim, cim_cls_name)(name=row.name)
 
     node_cols: dict[str, str] = {}
+    phases: str | None = None
     deferred_fks: list[tuple[str, str]] = []
     relative_qtys: list[tuple[str, Qty]] = []
 
@@ -99,6 +104,8 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
 
         if synthetic.is_connectivity_column(f.name):
             node_cols[f.name] = value
+        elif f.name == _PHASES_FIELD and _PHASES_FIELD not in obj.__dataclass_fields__:
+            phases = value
         elif f.name == _CONTAINER_FIELD:
             container = graph_write.resolve_any_subclass(network, network.cim.EquipmentContainer, value)
             if container is None:
@@ -113,14 +120,7 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
         else:
             graph_write.set_attr(obj, network.cim, f.name, value)
 
-    has_container_slot = _CONTAINER_FIELD in ref_slots
-    if node_cols:
-        connectivity.add_connectivity(network, obj, node_cols=node_cols, container=container)
-    elif has_container_slot:
-        resolved_container = container if container is not None else network.container
-        if isinstance(resolved_container, network.cim.EquipmentContainer):
-            graph_write.set_assc(obj, network.cim, _CONTAINER_FIELD, resolved_container)
-
+    # FKs first: a TransformerEnd's terminal goes on its PowerTransformer
     from_targets = []
     for attr, name in deferred_fks:
         target_cls_name = validate.reference_target_class(row_cls_name, attr)
@@ -135,6 +135,18 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
         graph_write.set_assc(obj, network.cim, attr, target)
         if attr.startswith(_FROM_PREFIX):
             from_targets.append(target)
+
+    has_container_slot = _CONTAINER_FIELD in ref_slots
+    terminals = []
+    if node_cols:
+        terminals = connectivity.add_connectivity(network, obj, node_cols=node_cols, container=container)
+    elif has_container_slot:
+        resolved_container = container if container is not None else network.container
+        if isinstance(resolved_container, network.cim.EquipmentContainer):
+            graph_write.set_assc(obj, network.cim, _CONTAINER_FIELD, resolved_container)
+
+    if phases is not None:
+        connectivity.add_phase_children(network, obj, terminals, phases=phases)
 
     if relative_qtys:
         z_base = _winding_z_base([obj, *from_targets])

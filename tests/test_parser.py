@@ -177,6 +177,19 @@ def test_whitespace_only_line_inside_table_is_noise():
     assert records[0].fields['name'] == 'line_1_2'
 
 
+def test_indented_comment_line_inside_table_is_noise():
+    # regression: VALUE used to match the indentation before '#', turning an
+    # indented comment line into an all-blank row
+    records, _ = _parse(
+        'Table PhaseImpedanceData: row, column, r\n'
+        '    1, 1, 0.3465\n'
+        '\n'
+        '    # a group comment\n'
+        '    2, 1, 0.1560\n'
+    )
+    assert [r.fields['row'] for r in records] == ['1', '2']
+
+
 def test_scientific_notation_and_negative_numbers():
     records, _ = _parse(
         'Table BatteryUnit: name, minP, maxP\n'

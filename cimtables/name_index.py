@@ -15,7 +15,10 @@ class NameIndex:
     def add(self, obj: object) -> None:
         """Bind obj under (type(obj), obj.name). Re-adding the same object is
         a no-op; a different object claiming an already-used name raises -
-        that's a real modeling error, not a NameIndex bug."""
+        that's a real modeling error, not a NameIndex bug. Unnamed objects
+        (e.g. PhaseImpedanceData rows) can't be referenced, so aren't indexed."""
+        if obj.name is None:
+            return
         by_name = self.by_class.setdefault(type(obj), {})
         existing = by_name.get(obj.name)
         if existing is not None and existing.identifier != obj.identifier:

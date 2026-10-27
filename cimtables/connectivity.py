@@ -5,6 +5,7 @@ synthesis. Every Builder's add_connectivity (Phase 5) is a thin wrapper around
 these two functions - no per-class node-vs-bus or phase logic anywhere else.
 """
 
+import re
 import typing
 
 from cimgraph.models import GraphModel
@@ -44,6 +45,42 @@ def _parent_assoc_field(phase_cls: type, parent: object) -> str:
     )
 
 
+def _resolve_node(network: GraphModel, col_name: str, node_name: str) -> object:
+    """The named ConnectivityNode/TopologicalNode, auto-vivified if new."""
+    node_cls = _node_cls(network, col_name)
+    node_obj = graph_write.resolve(network, node_cls, node_name)
+    if node_obj is None:
+        node_obj = node_cls(name=node_name)
+        graph_write.add_to_graph(network, node_obj)
+    return node_obj
+
+
+def _add_end_terminal(network: GraphModel, end: object, node_cols: dict[str, str]) -> object:
+    """A TransformerEnd row's node column: the Terminal belongs to the end's
+    PowerTransformer (the ConductingEquipment), sequenceNumber = endNumber,
+    and end.Terminal points at it. The PowerTransformer FK must already be set."""
+    cim = network.cim
+    if len(node_cols) != 1:
+        raise ValueError(f"{end.name!r}: a TransformerEnd takes exactly one node column, got {list(node_cols)}")
+    transformer = getattr(end, 'PowerTransformer', None)
+    if transformer is None or end.endNumber is None:
+        raise ValueError(f"{end.name!r}: a node column on a TransformerEnd needs its PowerTransformer and endNumber")
+
+    [(col_name, node_name)] = node_cols.items()
+    if not col_name.startswith('node'):
+        raise ValueError(f"{end.name!r}: a TransformerEnd connects by node, not {col_name!r}")
+    node_obj = _resolve_node(network, col_name, node_name)
+    if transformer.EquipmentContainer is not None and node_obj.ConnectivityNodeContainer is None:
+        graph_write.set_assc(node_obj, cim, 'ConnectivityNodeContainer', transformer.EquipmentContainer)
+
+    terminal = cim.Terminal(name=f'{transformer.name}_T{end.endNumber}', sequenceNumber=end.endNumber)
+    graph_write.set_assc(terminal, cim, 'ConductingEquipment', transformer)
+    graph_write.set_assc(terminal, cim, 'ConnectivityNode', node_obj)
+    graph_write.set_assc(end, cim, 'Terminal', terminal)
+    graph_write.add_to_graph(network, terminal)
+    return terminal
+
+
 def add_connectivity(network: GraphModel, obj: object, *, node_cols: dict[str, str],
                       container: object = None) -> list[object]:
     """node_cols is the already-disambiguated {'node1': 'busA', 'bus2': 'busB', ...}
@@ -57,16 +94,15 @@ def add_connectivity(network: GraphModel, obj: object, *, node_cols: dict[str, s
     Propagates the same container onto every node touched
     (ConnectivityNodeContainer), without overwriting one already set."""
     cim = network.cim
+    if isinstance(obj, cim.TransformerEnd):
+        return [_add_end_terminal(network, obj, node_cols)]
+
     resolved_container = container if container is not None else network.container
     has_container = isinstance(resolved_container, cim.EquipmentContainer)
 
     terminals = []
     for i, (col_name, node_name) in enumerate(node_cols.items(), start=1):
-        node_cls = _node_cls(network, col_name)
-        node_obj = graph_write.resolve(network, node_cls, node_name)
-        if node_obj is None:
-            node_obj = node_cls(name=node_name)
-            graph_write.add_to_graph(network, node_obj)
+        node_obj = _resolve_node(network, col_name, node_name)
 
         if has_container and node_obj.ConnectivityNodeContainer is None:
             graph_write.set_assc(node_obj, cim, 'ConnectivityNodeContainer', resolved_container)
@@ -74,7 +110,7 @@ def add_connectivity(network: GraphModel, obj: object, *, node_cols: dict[str, s
         terminal = cim.Terminal(name=f'{obj.name}_T{i}', sequenceNumber=i)
         graph_write.set_assc(terminal, cim, 'ConductingEquipment', obj)
 
-        if node_cls is cim.ConnectivityNode:
+        if isinstance(node_obj, cim.ConnectivityNode):
             graph_write.set_assc(terminal, cim, 'ConnectivityNode', node_obj)
         else:
             graph_write.set_assc(terminal, cim, 'TopologicalNode', node_obj)
@@ -88,17 +124,82 @@ def add_connectivity(network: GraphModel, obj: object, *, node_cols: dict[str, s
     return terminals
 
 
+_PHASE_TOKEN = re.compile(r's1|s2|[ABCN]')
+_PHASE_ORDER = ['A', 'B', 'C', 's1', 's2', 'N']
+
+
+def parse_phases(phases: str) -> list[str]:
+    """'CB' -> ['C', 'B'], 's1s2' -> ['s1', 's2']: SinglePhaseKind tokens in
+    the order written (= conductor order, e.g. matrix row order for a line)."""
+    tokens = _PHASE_TOKEN.findall(phases)
+    if ''.join(tokens) != phases or len(set(tokens)) != len(tokens):
+        raise ValueError(f"phases {phases!r} is not an ordered set of A/B/C/s1/s2/N")
+    return tokens
+
+
+def phase_code(tokens: list[str]) -> str:
+    """Canonical PhaseCode value for a token set: ['C', 'B'] -> 'BC',
+    ['s1', 's2', 'N'] -> 's12N'."""
+    ordered = ''.join(sorted(tokens, key=_PHASE_ORDER.index))
+    return ordered.replace('s1s2', 's12')
+
+
+def _phase_cls(network: GraphModel, obj: object) -> type:
+    """The per-phase child class for obj: <Class>Phase for the nearest class
+    in its MRO that has one (LinearShuntCompensator -> LinearShuntCompensatorPhase,
+    Breaker -> SwitchPhase)."""
+    for cls in type(obj).__mro__:
+        phase_cls = getattr(network.cim, f'{cls.__name__}Phase', None)
+        if phase_cls is not None:
+            return phase_cls
+    raise ValueError(f"{type(obj).__name__} has no <Class>Phase child class for a phases column")
+
+
+def _delta_pairs(tokens: list[str]) -> list[list[str]]:
+    """Line-to-line branches of a delta shunt: ['B', 'C'] -> [BC];
+    ['A', 'B', 'C'] -> [AB, BC, CA]."""
+    if len(tokens) == 2:
+        return [tokens]
+    return [[tokens[i], tokens[(i + 1) % len(tokens)]] for i in range(len(tokens))]
+
+
 def add_phase_children(network: GraphModel, obj: object, terminals: list[object],
-                        *, phases: str, phase_cls: type) -> list[object]:
-    """phases='ABCN' -> phase_cls (e.g. ACLineSegmentPhase) instances per §3.6,
-    wired to obj and given correct SinglePhaseKind + sequenceNumber."""
+                        *, phases: str) -> list[object]:
+    """phases='ABCN' -> per-phase children (e.g. ACLineSegmentPhase) per §3.6,
+    wired to obj. Every terminal gets the canonical PhaseCode of the set.
+
+    One child per token in written order, given SinglePhaseKind +
+    sequenceNumber - except a delta shunt (phaseConnection=D) whose child
+    class carries the `phases` PhaseCode extension (EnergyConsumerPhase,
+    ShuntCompensatorPhase, ...): there each child is one line-to-line branch,
+    so a single-phase delta load on BC is one child with phases=BC."""
     cim = network.cim
+    if not terminals:
+        raise ValueError(f"{obj.name!r}: a phases column needs a node/bus column to put the phases on")
+    tokens = parse_phases(phases)
+    for terminal in terminals:
+        graph_write.set_attr(terminal, cim, 'phases', cim.PhaseCode(phase_code(tokens)))
+    if isinstance(obj, cim.TransformerEnd):
+        return []  # an end's phases live on its terminal only
+
+    phase_cls = _phase_cls(network, obj)
     parent_field = _parent_assoc_field(phase_cls, obj)
-    has_sequence_number = 'sequenceNumber' in typing.get_type_hints(phase_cls)
+    child_hints = typing.get_type_hints(phase_cls)
+    has_sequence_number = 'sequenceNumber' in child_hints
+    is_delta = getattr(obj, 'phaseConnection', None) == cim.PhaseShuntConnectionKind.D
+    if is_delta and 'phases' in child_hints:
+        branches = [phase_code(pair) for pair in _delta_pairs(tokens)]
+        new_children = [phase_cls(name=f'{obj.name}_{code}', phases=cim.PhaseCode(code)) for code in branches]
+    else:
+        # SwitchPhase has phaseSide1/phaseSide2 instead of phase: same phase both sides
+        phase_attrs = ['phase'] if 'phase' in child_hints else ['phaseSide1', 'phaseSide2']
+        new_children = [
+            phase_cls(name=f'{obj.name}_{t}', **{attr: cim.SinglePhaseKind(t) for attr in phase_attrs})
+            for t in tokens
+        ]
 
     children = []
-    for i, letter in enumerate(phases, start=1):
-        child = phase_cls(name=f'{obj.name}_{letter}', phase=cim.SinglePhaseKind(letter))
+    for i, child in enumerate(new_children, start=1):
         if has_sequence_number:
             child.sequenceNumber = i
         graph_write.set_assc(child, cim, parent_field, obj)

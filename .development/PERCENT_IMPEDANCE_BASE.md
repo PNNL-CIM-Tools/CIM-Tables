@@ -1,4 +1,4 @@
-# Percent impedance base: `baseU²/baseS`, with the winding descriptions flipped
+# Percent impedance base: `baseU²/baseS`
 
 Decision for how `bind_row` converts a `percent` / `pu` impedance column
 (`r (percent)`, `x (percent)`, ...) to ohms. Implemented in
@@ -28,9 +28,9 @@ There is no fallback because a winding's `ratedU` is phase-to-phase: falling
 back to it for a wye or split-phase coil would silently be 3× or 4× wrong.
 Instead, conversion fails fast.
 
-## The definitions this assumes (flipped from cim18v17)
+## The definitions this assumes
 
-The cim18v17 descriptions give `ratedU` two meanings:
+Earlier cim18v17 descriptions (before the 2026-10-26 regeneration) gave `ratedU` two meanings:
 
 - `PowerTransformerEnd.ratedU`: "The **phase-to-phase** rated voltage at no load"
 - `TransformerWinding.ratedU`: coil voltage (IEV 421-04-01), "for wye-connected
@@ -38,7 +38,8 @@ The cim18v17 descriptions give `ratedU` two meanings:
 - `TransformerWinding.baseU`: "Base **phase-to-phase** voltage used for
   calculation of percent impedance"
 
-The `TransformerWinding` descriptions were swapped. Corrected, the attributes are:
+The `TransformerWinding` descriptions were swapped. They are corrected in the
+regenerated cim18v17 profile:
 
 | attribute | meaning | 1φ 250 kVA 12470GrdY/7200 – 120/240 |
 |---|---|---|
@@ -72,20 +73,16 @@ That's why no rule built on a phase-to-phase voltage can work for every winding.
 
 ## IEC WG13 ticket
 
-1. **Swap the `TransformerWinding.baseU` and `ratedU` descriptions.**
-   - `ratedU` becomes phase-to-phase per the nameplate designation, consistent
-     with `PowerTransformerEnd.ratedU`.
-   - `baseU` becomes the voltage between the winding's own terminals
-     (IEV 421-04-01; phase-to-neutral for wye-connected windings), used with
-     `baseS` for percent impedance.
-2. **State that `baseS` is the common power base** for all of a tank's percent
-   impedances, which is OpenDSS's winding-1 kVA.
+1. ~~Swap the `TransformerWinding.baseU` and `ratedU` descriptions.~~ Done in
+   the regenerated cim18v17.
+2. ~~State that `baseS` is the common power base.~~ Done for the split-phase
+   center-tap case ("the rating of the primary winding is used as the basis for
+   both secondary windings"). It could still be generalized to "all of a tank's
+   percent impedances".
 3. **Mesh impedance base.** CIM says the From end "determines the voltage
    reference" but not that the percent/per-unit base is the From winding's
    `baseU`/`baseS`. cimtables assumes it is. Ask for explicit wording.
 
-Until the profile changes, `.cimtbl` files follow the corrected definitions and
-say so in a comment (see the template above).
 
 ## Not implemented
 

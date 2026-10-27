@@ -41,7 +41,7 @@ IMPORT.3: "Import"
 OBJECT.3: "Object"
 TABLE.3: "Table"
 NAME.2: /[A-Za-z_][A-Za-z0-9_]*/
-VALUE: /[^,()\n#]+/
+VALUE: /[^,()\s#][^,()\n#]*/   // never starts with whitespace, so an indented comment line is not a blank cell
 UNIT_TEXT: /[^()\n]+/
 FILENAME: /[^\s#][^\n#]*\.cimtbl/
 
