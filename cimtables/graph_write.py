@@ -30,7 +30,8 @@ from types import ModuleType
 from cimprofiles.units.units import CIMUnit
 from cimgraph.models import GraphModel
 
-from cimtables.units import Qty, relative_to_ohm
+from cimtables.impedance import relative_to_ohm, relative_to_siemens
+from cimtables.units import Qty
 
 
 def _cim_unit_type(obj: object, attr: str) -> type[CIMUnit] | None:
@@ -69,13 +70,15 @@ def _part_field(part: ModuleType, obj: object, attr: str) -> dataclasses.Field:
 
 
 def set_attr(obj: object, part: ModuleType, attr: str, value: object, *,
-             z_base: float | None = None) -> None:
+             z_base: float | None = None, y_base: float | None = None) -> None:
     """Set a plain scalar or Qty onto a live cim-graph object's attribute.
 
     A pu/percent Qty on an ohm-typed attribute (r, x, r0, ...) is converted
     to ohms against `z_base` (ohms, resolved by the caller); raises if none
-    was given. Relative Qtys on non-impedance attributes (PerCent) pass
-    through unchanged.
+    was given. A pu/percent Qty on a siemens-typed attribute (b, g, bch,
+    gch, ...) is converted to siemens against `y_base` (siemens) the same
+    way; raises if none was given. Relative Qtys on non-impedance/
+    non-admittance attributes (PerCent) pass through unchanged.
 
     Raises ValueError if `attr` is not a real field of part's same-named
     class, or if it IS a field but an association (has metadata['inverse'])
@@ -98,13 +101,18 @@ def set_attr(obj: object, part: ModuleType, attr: str, value: object, *,
                 f"{type(obj).__name__}.{attr} is not a CIMUnit-typed attribute, "
                 f"but got a Qty ({value!r})"
             )
-        if value.is_relative() and cim_unit_type(0).unit.name == 'ohm':
-            if z_base is None:
+        unit_name = cim_unit_type(0).unit.name
+        if value.is_relative() and unit_name in ('ohm', 'S'):
+            base, base_unit, convert = (
+                (z_base, 'z_base', relative_to_ohm) if unit_name == 'ohm'
+                else (y_base, 'y_base', relative_to_siemens)
+            )
+            if base is None:
                 raise ValueError(
-                    f"{type(obj).__name__}.{attr}: {value.unit!r} impedance needs a z_base, "
+                    f"{type(obj).__name__}.{attr}: {value.unit!r} value needs a {base_unit}, "
                     f"but none could be resolved for {getattr(obj, 'mRID', obj)!r}"
                 )
-            setattr(obj, attr, cim_unit_type(relative_to_ohm(value, z_base), 'ohm'))
+            setattr(obj, attr, cim_unit_type(convert(value, base), unit_name))
             return
         if value.unit:
             setattr(obj, attr, cim_unit_type(value.value, value.unit))
@@ -126,10 +134,11 @@ def _set_side(obj: object, attr: str, field: dataclasses.Field, target: object) 
         setattr(obj, attr, target)
 
 
-def set_assc(obj: object, part: ModuleType, assc: str, target: object) -> None:
+def set_assc(obj: object, part: ModuleType, assc: str, target: object) -> object:
     """Set obj.<assc> = target AND write the reverse side onto target,
     resolved from part's field metadata['inverse'] - the one call site for
-    establishing any association, so the graph is never one-sided.
+    establishing any association, so the graph is never one-sided. Returns
+    `target`, so a caller (or set_assc_from_mrid) can chain off it.
 
     Raises ValueError if `assc` is not a real field of part's same-named
     class, or if it IS a field but a plain scalar (metadata['inverse'] is
@@ -148,6 +157,7 @@ def set_assc(obj: object, part: ModuleType, assc: str, target: object) -> None:
     _set_side(obj, assc, field, target)
     if target is not None:
         _set_side(target, reverse_attr, reverse_field, obj)
+    return target
 
 
 def add_to_graph(network: GraphModel, obj: object) -> None:
@@ -166,3 +176,22 @@ def resolve(network: GraphModel, cim_cls: type, mRID: str) -> object | None:
     if obj is not None and not isinstance(obj, cim_cls):
         raise ValueError(f"mRID {mRID!r} is a {type(obj).__name__}, not a {cim_cls.__name__}")
     return obj
+
+
+def set_assc_from_mrid(network: GraphModel, obj: object, part: ModuleType, assc: str,
+                        cim_cls: type, mRID: str) -> object:
+    """resolve() + set_assc() in one call, for the common required-FK shape
+    every add_<part> method otherwise hand-writes: resolve the target by
+    mRID, raise a consistent ValueError if it's missing, else wire it up.
+    Returns the resolved target (matching set_assc's own return).
+
+    Leave a multi-target check (e.g. two ends resolved together with one
+    combined error message) as free-standing resolve()/set_assc() calls -
+    this helper is for the single-target case only."""
+    target = resolve(network, cim_cls, mRID)
+    if target is None:
+        raise ValueError(
+            f"{getattr(obj, 'mRID', obj)!r}: {assc} {mRID!r} not found in graph "
+            f"(build it before the object that references it)"
+        )
+    return set_assc(obj, part, assc, target)

@@ -22,7 +22,7 @@ import cimprofiles.cim18.cim18v17 as cim
 from cimgraph.databases import XMLFile
 from cimgraph.models import BusBranchModel
 
-from cimtables import graph_write
+from cimtables import graph_write, impedance
 from cimtables.binder import bind_row
 from cimtables import parser, validate
 
@@ -149,19 +149,54 @@ def test_percent_impedance_on_from_reference_rating(network):
 
 
 def test_percent_impedance_without_base_raises(network):
-    with pytest.raises(ValueError, match=r"'percent' impedance needs a z_base"):
+    with pytest.raises(ValueError, match=r"'percent' value needs a z_base"):
         _bind_text(network, 'Object TransformerMeshImpedance: mRID=mesh_1, x (percent)=2.0\n')
 
 
-def test_z_base_prefers_base_ratings_when_class_has_them():
-    # TransformerWinding-shaped: baseU = coil voltage, baseS = common tank kVA;
-    # ratedU is phase-to-phase and must not be used
-    from types import SimpleNamespace
-    from cimtables.binder import _winding_z_base
-    half_winding = SimpleNamespace(
-        baseU=cim.Voltage(120, 'V'), baseS=cim.ApparentPower(250, 'kVA'),
-        ratedU=cim.Voltage(240, 'V'), ratedS=cim.ApparentPower(125, 'kVA'))
-    assert _winding_z_base([half_winding]) == pytest.approx(120 ** 2 / 250e3)
+_PU_LINE = 'Object BaseVoltage: mRID=bv_115kv, nominalVoltage (kV)=115\n'
 
-    half_winding.baseS = None  # no silent fallback to ratedS
-    assert _winding_z_base([half_winding]) is None
+
+def test_pu_impedance_falls_back_to_system_base_when_no_rating_pair(network, monkeypatch):
+    # ACLineSegment has no ratedU/ratedS/baseU/baseS at all - resolve_winding_z_base
+    # finds nothing on it, so bind_row must fall back to CIMG_SYSTEM_MVA_BASE +
+    # the line's own BaseVoltage, same as cimbuilder's ACLineSegmentBuilder.
+    monkeypatch.setenv('CIMG_SYSTEM_MVA_BASE', '100')
+    impedance.get_system_mva_base.cache_clear()
+    try:
+        _bind_text(network, _PU_LINE + (
+            'Object ACLineSegment: mRID=line_1, BaseVoltage=bv_115kv, '
+            'r (pu)=0.01938, x (pu)=0.05917, bch (pu)=0.0528\n'
+        ))
+    finally:
+        impedance.get_system_mva_base.cache_clear()
+
+    line = graph_write.resolve(network, cim.ACLineSegment, 'line_1')
+    z_base = 115000 ** 2 / 100e6
+    y_base = 1.0 / z_base
+    assert line.r.to('ohm') == pytest.approx(0.01938 * z_base)
+    assert line.x.to('ohm') == pytest.approx(0.05917 * z_base)
+    assert line.bch.to('S') == pytest.approx(0.0528 * y_base)
+
+
+def test_pu_impedance_without_system_mva_base_raises(network, monkeypatch):
+    monkeypatch.delenv('CIMG_SYSTEM_MVA_BASE', raising=False)
+    impedance.get_system_mva_base.cache_clear()
+    try:
+        with pytest.raises(ValueError, match=r"'pu' value needs a z_base"):
+            _bind_text(network, _PU_LINE + (
+                'Object ACLineSegment: mRID=line_1, BaseVoltage=bv_115kv, r (pu)=0.01938\n'
+            ))
+    finally:
+        impedance.get_system_mva_base.cache_clear()
+
+
+def test_pu_impedance_without_base_voltage_raises(network, monkeypatch):
+    monkeypatch.setenv('CIMG_SYSTEM_MVA_BASE', '100')
+    impedance.get_system_mva_base.cache_clear()
+    try:
+        with pytest.raises(ValueError, match=r"'pu' value needs a z_base"):
+            _bind_text(network, 'Object ACLineSegment: mRID=line_1, r (pu)=0.01938\n')
+    finally:
+        impedance.get_system_mva_base.cache_clear()
+
+

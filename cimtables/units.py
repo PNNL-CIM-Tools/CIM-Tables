@@ -23,9 +23,3 @@ class Qty:
 
     def is_relative(self) -> bool:
         return self.unit in ('pu', 'percent')
-
-
-def relative_to_ohm(qty: Qty, z_base_ohm: float) -> float:
-    """A pu/percent impedance in ohms, on an already-resolved z_base."""
-    per_unit = qty.value / 100 if qty.unit == 'percent' else qty.value
-    return per_unit * z_base_ohm

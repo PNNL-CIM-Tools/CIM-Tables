@@ -62,6 +62,30 @@ def test_set_attr_qty_on_non_quantity_attr_raises():
         graph_write.set_attr(bv, cim, 'name', Qty(1.0, 'V'))
 
 
+def test_set_attr_relative_ohm_converts_against_z_base():
+    line = cim.ACLineSegment(mRID='line')
+    graph_write.set_attr(line, cim, 'r', Qty(2.0, 'percent'), z_base=1000.0)
+    assert line.r.to('ohm') == pytest.approx(20.0)
+
+
+def test_set_attr_relative_ohm_without_z_base_raises():
+    line = cim.ACLineSegment(mRID='line')
+    with pytest.raises(ValueError, match='needs a z_base'):
+        graph_write.set_attr(line, cim, 'r', Qty(2.0, 'percent'))
+
+
+def test_set_attr_relative_siemens_converts_against_y_base():
+    line = cim.ACLineSegment(mRID='line')
+    graph_write.set_attr(line, cim, 'bch', Qty(5.0, 'percent'), y_base=1000.0)
+    assert line.bch.to('S') == pytest.approx(50.0)
+
+
+def test_set_attr_relative_siemens_without_y_base_raises():
+    line = cim.ACLineSegment(mRID='line')
+    with pytest.raises(ValueError, match='needs a y_base'):
+        graph_write.set_attr(line, cim, 'bch', Qty(5.0, 'percent'))
+
+
 def test_set_attr_unknown_field_raises():
     bv = cim.BaseVoltage(mRID='bv')
     with pytest.raises(ValueError, match='not a field'):
