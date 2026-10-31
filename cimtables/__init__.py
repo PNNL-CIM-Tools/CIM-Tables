@@ -12,7 +12,6 @@ cim-graph objects out" never needs anything else from this package."""
 
 from cimtables import connectivity, graph_write, synthetic, validate
 from cimtables.binder import bind_row
-from cimtables.name_index import NameIndex
 from cimtables.parser import parse_file, parse_text
 from cimtables.records import RawRecord
 from cimtables.units import Qty
@@ -20,7 +19,7 @@ from cimtables.validate import CimtblValidationError
 
 __all__ = [
     'bind_row', 'connectivity', 'graph_write', 'synthetic', 'validate',
-    'parse_file', 'parse_text', 'RawRecord', 'Qty', 'NameIndex',
+    'parse_file', 'parse_text', 'RawRecord', 'Qty',
     'CimtblValidationError', 'load',
 ]
 

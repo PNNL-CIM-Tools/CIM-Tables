@@ -45,12 +45,12 @@ def _parent_assoc_field(phase_cls: type, parent: object) -> str:
     )
 
 
-def _resolve_node(network: GraphModel, col_name: str, node_name: str) -> object:
-    """The named ConnectivityNode/TopologicalNode, auto-vivified if new."""
+def _resolve_node(network: GraphModel, col_name: str, node_mrid: str) -> object:
+    """The ConnectivityNode/TopologicalNode with this mRID, auto-vivified if new."""
     node_cls = _node_cls(network, col_name)
-    node_obj = graph_write.resolve(network, node_cls, node_name)
+    node_obj = graph_write.resolve(network, node_cls, node_mrid)
     if node_obj is None:
-        node_obj = node_cls(name=node_name)
+        node_obj = node_cls(mRID=node_mrid)
         graph_write.add_to_graph(network, node_obj)
     return node_obj
 
@@ -66,17 +66,17 @@ def _add_end_terminal(network: GraphModel, end: object, node_cols: dict[str, str
     and end.Terminal points at it. The PowerTransformer FK must already be set."""
     cim = network.cim
     if len(node_cols) != 1:
-        raise ValueError(f"{end.name!r}: a TransformerEnd takes exactly one node/bus column, got {list(node_cols)}")
+        raise ValueError(f"{end.mRID!r}: a TransformerEnd takes exactly one node/bus column, got {list(node_cols)}")
     transformer = getattr(end, 'PowerTransformer', None)
     if transformer is None or end.endNumber is None:
-        raise ValueError(f"{end.name!r}: a node/bus column on a TransformerEnd needs its PowerTransformer and endNumber")
+        raise ValueError(f"{end.mRID!r}: a node/bus column on a TransformerEnd needs its PowerTransformer and endNumber")
 
-    [(col_name, node_name)] = node_cols.items()
-    node_obj = _resolve_node(network, col_name, node_name)
+    [(col_name, node_mrid)] = node_cols.items()
+    node_obj = _resolve_node(network, col_name, node_mrid)
     if transformer.EquipmentContainer is not None and node_obj.ConnectivityNodeContainer is None:
         graph_write.set_assc(node_obj, cim, 'ConnectivityNodeContainer', transformer.EquipmentContainer)
 
-    terminal = cim.Terminal(name=f'{transformer.name}_T{end.endNumber}', sequenceNumber=end.endNumber)
+    terminal = cim.Terminal(mRID=f'{transformer.mRID}_T{end.endNumber}', sequenceNumber=end.endNumber)
     graph_write.set_assc(terminal, cim, 'ConductingEquipment', transformer)
     graph_write.set_assc(terminal, cim, _terminal_node_field(network, node_obj), node_obj)
     graph_write.set_assc(end, cim, 'Terminal', terminal)
@@ -87,8 +87,8 @@ def _add_end_terminal(network: GraphModel, end: object, node_cols: dict[str, str
 def add_connectivity(network: GraphModel, obj: object, *, node_cols: dict[str, str],
                       container: object = None) -> list[object]:
     """node_cols is the already-disambiguated {'node1': 'busA', 'bus2': 'busB', ...}
-    slice of a <Class>Row - the caller picks which of the row's fields are
-    connectivity columns. Auto-vivifies any name not found via resolve().
+    slice of a <Class>Row (node/bus mRIDs) - the caller picks which of the row's
+    fields are connectivity columns. Auto-vivifies any mRID not found via resolve().
     Returns Terminals in column order (sequenceNumber = list index + 1).
 
     Sets obj.EquipmentContainer from `container`, falling back to
@@ -104,13 +104,13 @@ def add_connectivity(network: GraphModel, obj: object, *, node_cols: dict[str, s
     has_container = isinstance(resolved_container, cim.EquipmentContainer)
 
     terminals = []
-    for i, (col_name, node_name) in enumerate(node_cols.items(), start=1):
-        node_obj = _resolve_node(network, col_name, node_name)
+    for i, (col_name, node_mrid) in enumerate(node_cols.items(), start=1):
+        node_obj = _resolve_node(network, col_name, node_mrid)
 
         if has_container and node_obj.ConnectivityNodeContainer is None:
             graph_write.set_assc(node_obj, cim, 'ConnectivityNodeContainer', resolved_container)
 
-        terminal = cim.Terminal(name=f'{obj.name}_T{i}', sequenceNumber=i)
+        terminal = cim.Terminal(mRID=f'{obj.mRID}_T{i}', sequenceNumber=i)
         graph_write.set_assc(terminal, cim, 'ConductingEquipment', obj)
 
         graph_write.set_assc(terminal, cim, _terminal_node_field(network, node_obj), node_obj)
@@ -175,7 +175,7 @@ def add_phase_children(network: GraphModel, obj: object, terminals: list[object]
     so a single-phase delta load on BC is one child with phases=BC."""
     cim = network.cim
     if not terminals:
-        raise ValueError(f"{obj.name!r}: a phases column needs a node/bus column to put the phases on")
+        raise ValueError(f"{obj.mRID!r}: a phases column needs a node/bus column to put the phases on")
     tokens = parse_phases(phases)
     for terminal in terminals:
         graph_write.set_attr(terminal, cim, 'phases', cim.PhaseCode(phase_code(tokens)))
@@ -189,12 +189,12 @@ def add_phase_children(network: GraphModel, obj: object, terminals: list[object]
     is_delta = getattr(obj, 'phaseConnection', None) == cim.PhaseShuntConnectionKind.D
     if is_delta and 'phases' in child_hints:
         branches = [phase_code(pair) for pair in _delta_pairs(tokens)]
-        new_children = [phase_cls(name=f'{obj.name}_{code}', phases=cim.PhaseCode(code)) for code in branches]
+        new_children = [phase_cls(mRID=f'{obj.mRID}_{code}', phases=cim.PhaseCode(code)) for code in branches]
     else:
         # SwitchPhase has phaseSide1/phaseSide2 instead of phase: same phase both sides
         phase_attrs = ['phase'] if 'phase' in child_hints else ['phaseSide1', 'phaseSide2']
         new_children = [
-            phase_cls(name=f'{obj.name}_{t}', **{attr: cim.SinglePhaseKind(t) for attr in phase_attrs})
+            phase_cls(mRID=f'{obj.mRID}_{t}', **{attr: cim.SinglePhaseKind(t) for attr in phase_attrs})
             for t in tokens
         ]
 

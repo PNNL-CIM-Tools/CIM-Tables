@@ -19,7 +19,7 @@ rest, a field whose type union contains a CIMUnit subclass (Voltage,
 ActivePower, ...) is a physical-quantity slot (§4.3) and becomes a Qty; a
 field whose type union contains another CIM dataclass is a reference/FK slot
 (§3.3) and stays an unresolved name string, exactly as before - resolving a
-name into a live object is still binder.py's job (NameIndex.get, §5.5), never
+mRID into a live object is still binder.py's job (graph_write.resolve), never
 validate's; everything else is a plain scalar, coerced from the record's raw
 string with _coerce.
 """
@@ -33,13 +33,13 @@ from enum import Enum
 from typing import Any
 
 from cimgraph.core.env_vars import get_cim_profile
-from cimgraph.data_profile.units.units import CIMUnit
+from cimprofiles.units.units import CIMUnit
 
 from cimtables.units import Qty
 from cimtables import records, synthetic
 
 _row_dataclasses: dict[tuple[str, str], type] = {}
-_SKIP_FIELDS = {'name', 'identifier'}
+_SKIP_FIELDS = {'mRID', 'identifier'}
 
 
 class CimtblValidationError(ValueError):
@@ -98,23 +98,12 @@ def _classify(hint: Any) -> tuple[str, type]:
     return _FieldKind.SCALAR, (real_args[0] if real_args else str)
 
 
-def _real_fields(cim_cls: type, cim_module) -> dict[str, tuple[str, type]]:
+def _real_fields(cim_cls: type) -> dict[str, tuple[str, type]]:
     """{field_name: (kind, extra)} for every column a .cimtbl row may set on
     this CIM class - every dataclass field except pure reverse/derived
-    associations (serialize=False) and identity bookkeeping (name/identifier,
+    associations (serialize=False) and identity bookkeeping (mRID/identifier,
     handled separately)."""
-    try:
-        hints = typing.get_type_hints(cim_cls)
-    except NameError:
-        # A runtime-merged profile's classes live in cimgraph's merge module,
-        # whose globals lack the names (Optional, the profile's own classes)
-        # their annotations use - the resolved profile module has them all.
-        # localns={} matters: left as None it defaults to the class's own
-        # attributes, where a field named like its type (BaseVoltage = None)
-        # would shadow the class it is annotated with.
-        hints = typing.get_type_hints(
-            cim_cls, globalns={**vars(typing), **vars(cim_module)}, localns={}
-        )
+    hints = typing.get_type_hints(cim_cls)
     classified = {}
     for field in dataclasses.fields(cim_cls):
         if field.name in _SKIP_FIELDS or field.metadata.get('serialize') is False:
@@ -136,7 +125,7 @@ def reference_slots(row_cls_name: str, *, profile: str | None = None) -> set[str
     cim_module = _cim_module(profile)
     cim_cls = getattr(cim_module, cim_cls_name)
     return {
-        name for name, (kind, _) in _real_fields(cim_cls, cim_module).items()
+        name for name, (kind, _) in _real_fields(cim_cls).items()
         if kind == _FieldKind.REFERENCE
     }
 
@@ -144,12 +133,12 @@ def reference_slots(row_cls_name: str, *, profile: str | None = None) -> set[str
 def reference_target_class(row_cls_name: str, slot_name: str, *, profile: str | None = None) -> str:
     """The CIM class name a reference slot resolves against (e.g.
     'BaseVoltage', 'LoadResponseCharacteristic', 'EquipmentContainer') - what
-    Phase 4/5 needs to call graph_write.resolve()/resolve_any_subclass()
+    Phase 4/5 needs to call graph_write.resolve()
     generically, with no per-class FK table to maintain."""
     cim_cls_name = row_cls_name.removesuffix('Row')
     cim_module = _cim_module(profile)
     cim_cls = getattr(cim_module, cim_cls_name)
-    _, target_cls = _real_fields(cim_cls, cim_module)[slot_name]
+    _, target_cls = _real_fields(cim_cls)[slot_name]
     return target_cls.__name__
 
 
@@ -183,9 +172,10 @@ def _row_dataclass(row_cls_name: str, profile: str) -> type:
         )
 
     fields: list[tuple[str, Any, dataclasses.Field]] = [
-        ('name', str, dataclasses.field()),
+        ('mRID', str | None, dataclasses.field()),
+        ('identifier', str | None, dataclasses.field(default=None)),
     ]
-    real_fields = _real_fields(cim_cls, cim_module)
+    real_fields = _real_fields(cim_cls)
     for field_name, (kind, extra) in real_fields.items():
         if kind == _FieldKind.QUANTITY:
             field_type = Qty
@@ -229,18 +219,35 @@ def validate(record: records.RawRecord, *, profile: str | None = None) -> object
             f"unknown CIM class {record.cim_class!r} (not in profile {profile!r})"
         )
 
-    real_fields = _real_fields(cim_cls, cim_module)
-    valid_columns = {*real_fields, *synthetic.SYNTHETIC_COLUMNS, 'name'}
+    real_fields = _real_fields(cim_cls)
+    # The row key: mRID on an IdentifiedObject, else (CIM 18 Identity-only classes,
+    # e.g. PhaseImpedanceData) an optional identifier seeding a deterministic UUID
+    has_mrid = 'mRID' in cim_cls.__dataclass_fields__
+    key_column = 'mRID' if has_mrid else 'identifier'
+    valid_columns = {*real_fields, *synthetic.SYNTHETIC_COLUMNS, key_column}
 
+    if not has_mrid and 'mRID' in record.fields:
+        raise CimtblValidationError(
+            f"{record.source_file}:{record.source_line}: {record.cim_class} is not an "
+            f"IdentifiedObject (no mRID) - key it with an identifier column instead"
+        )
     for bad_column in record.fields:
         if bad_column not in valid_columns:
             raise _closest_attribute_error(
                 sorted(valid_columns), bad_column, record.source_file, record.source_line, row_cls_name
             )
 
+    # mRID is the row's key (unique within the model, CIM 18); name is optional data
+    mRID = record.fields.get('mRID')
+    if mRID is None and has_mrid:
+        raise CimtblValidationError(
+            f"{record.source_file}:{record.source_line}: {record.cim_class} row has no mRID"
+        )
+
     row_cls = _row_dataclass(row_cls_name, profile)
     row_kwargs: dict[str, Any] = {
-        'name': record.fields.get('name'),
+        'mRID': mRID,
+        'identifier': record.fields.get('identifier'),
         'source_file': record.source_file,
         'source_line': record.source_line,
     }

@@ -206,11 +206,11 @@ def test_scientific_notation_and_negative_numbers():
 
 def test_profile_statement():
     records, profile = _parse(
-        'Profile = cimhub_2026\n'
+        'Profile = cim18v17\n'
         '\n'
         'Object BaseFrequency: name=base_freq, frequency=60\n'
     )
-    assert profile == 'cimhub_2026'
+    assert profile == 'cim18v17'
     assert len(records) == 1
 
 
@@ -245,7 +245,7 @@ def test_import_splices_records_from_file():
     # wire_infos.cimtbl has two `Table OverheadWireInfo` blocks (3 rows total)
     assert len(wire_records) == 3
     assert wire_records[0].source_file.endswith('wire_infos.cimtbl')
-    names = [r.fields['name'] for r in wire_records]
+    names = [r.fields['mRID'] for r in wire_records]
     assert names == ['ACSR_556_5', 'ACSR_4/0', 'CU_1/0']
 
 
@@ -255,7 +255,7 @@ def test_import_profile_mismatch_raises(tmp_path):
         'Object BaseFrequency: name=base_freq, frequency=60\n'
     )
     (tmp_path / 'main.cimtbl').write_text(
-        'Profile = cimhub_2026\n'
+        'Profile = cim18v17\n'
         'Import catalog.cimtbl\n'
     )
     with pytest.raises(ValueError, match='Profile mismatch'):
@@ -264,12 +264,12 @@ def test_import_profile_mismatch_raises(tmp_path):
 
 def test_import_profile_inherited_when_absent_locally(tmp_path):
     (tmp_path / 'catalog.cimtbl').write_text(
-        'Profile = cimhub_2026\n'
+        'Profile = cim18v17\n'
         'Object BaseFrequency: name=base_freq, frequency=60\n'
     )
     (tmp_path / 'main.cimtbl').write_text('Import catalog.cimtbl\n')
     records, profile = parser.parse_file(tmp_path / 'main.cimtbl')
-    assert profile == 'cimhub_2026'
+    assert profile == 'cim18v17'
     assert len(records) == 1
 
 
@@ -280,13 +280,13 @@ def test_ieee13_parses_end_to_end():
     assert len(records) == 75
     assert profile is None
 
-    line_1_2 = next(r for r in records if r.fields.get('name') == 'line_1_2')
+    line_1_2 = next(r for r in records if r.fields.get('mRID') == 'line_1_2')
     assert line_1_2.fields['r'] == '1.93800E-2'
     assert line_1_2.fields['x'] == '5.91700E-2'
     assert line_1_2.fields['bch'] == '0.05280'
     assert line_1_2.units['r'] == 'pu'
 
-    load_634 = next(r for r in records if r.fields.get('name') == 'load_634')
+    load_634 = next(r for r in records if r.fields.get('mRID') == 'load_634')
     assert load_634.fields['p'] is None
     assert load_634.fields['q'] is None
 
@@ -325,7 +325,7 @@ def test_ieee13_validates_end_to_end_through_phase2():
     for record in records:
         if record.cim_class in _KNOWN_SCHEMA_GAPS:
             continue
-        if record.fields.get('name') == 'load_646bc':
+        if record.fields.get('mRID') == 'load_646bc':
             continue
         validate.validate(record)
         checked += 1

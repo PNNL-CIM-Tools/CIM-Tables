@@ -8,7 +8,7 @@ The graph-write core: the only place that actually mutates a live cimgraph
 object or writes it into a GraphModel. Everything else (the binder, the
 connectivity backend, builder add_<part> methods) calls through here rather
 than touching `setattr`/`network.add_to_graph` directly, so unit-binding,
-profile-part checking, reverse-association writes, and name-indexing can
+profile-part checking, reverse-association writes, and mRID-indexing can
 never be forgotten at a call site.
 
 set_attr/set_assc's `part` argument is a reference profile-part module (e.g.
@@ -27,10 +27,9 @@ import dataclasses
 import typing
 from types import ModuleType
 
-from cimgraph.data_profile.units.units import CIMUnit
+from cimprofiles.units.units import CIMUnit
 from cimgraph.models import GraphModel
 
-from cimtables.name_index import NameIndex
 from cimtables.units import Qty, relative_to_ohm
 
 
@@ -103,7 +102,7 @@ def set_attr(obj: object, part: ModuleType, attr: str, value: object, *,
             if z_base is None:
                 raise ValueError(
                     f"{type(obj).__name__}.{attr}: {value.unit!r} impedance needs a z_base, "
-                    f"but none could be resolved for {getattr(obj, 'name', obj)!r}"
+                    f"but none could be resolved for {getattr(obj, 'mRID', obj)!r}"
                 )
             setattr(obj, attr, cim_unit_type(relative_to_ohm(value, z_base), 'ohm'))
             return
@@ -152,25 +151,18 @@ def set_assc(obj: object, part: ModuleType, assc: str, target: object) -> None:
 
 
 def add_to_graph(network: GraphModel, obj: object) -> None:
-    """The single call site (§12.3): add obj to the live graph and its
-    NameIndex together, so the two can never drift out of sync."""
+    """The single call site (§12.3): add obj to the live graph, which also
+    indexes its mRID (cim-graph raises on an mRID already used by another
+    object - mRIDs are unique within the model, not per class)."""
     network.add_to_graph(obj)
-    network.name_index.add(obj)
 
 
-def resolve(network: GraphModel, cim_cls: type, name: str) -> object | None:
-    """O(1) name -> object lookup. Never raises; None means not found -
-    callers decide whether that's an auto-vivify or an error."""
-    return network.name_index.get(cim_cls, name)
-
-
-def resolve_any_subclass(network: GraphModel, base_cls: type, name: str) -> object | None:
-    """Like resolve(), but for an FK slot typed as an abstract base (e.g.
-    EquipmentContainer) whose NameIndex entries are keyed by the concrete
-    subclass actually built (Feeder, Substation, ...) - NameIndex.add binds
-    under type(obj), never a supertype. Checks every concrete subclass bound
-    so far; never raises."""
-    for bound_cls, by_name in network.name_index.by_class.items():
-        if issubclass(bound_cls, base_cls) and name in by_name:
-            return by_name[name]
-    return None
+def resolve(network: GraphModel, cim_cls: type, mRID: str) -> object | None:
+    """O(1) mRID -> object lookup. None means not found - callers decide
+    whether that's an auto-vivify or an error. cim_cls may be an abstract
+    base (EquipmentContainer, PerLengthImpedance, ...): any subclass matches.
+    Raises ValueError if the mRID belongs to an object of another class."""
+    obj = network.find_by_mRID(mRID)
+    if obj is not None and not isinstance(obj, cim_cls):
+        raise ValueError(f"mRID {mRID!r} is a {type(obj).__name__}, not a {cim_cls.__name__}")
+    return obj

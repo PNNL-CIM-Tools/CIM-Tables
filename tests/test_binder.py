@@ -2,9 +2,9 @@
 
 "Simplest real classes end-to-end into a live cimgraph model: BaseVoltage,
 BaseFrequency, BasePower, EnergySource. network.cim read once; plain scalar
-attrs + units land correctly (verified via .to()); NameIndex populated at the
-same add_to_graph call site, O(1) name lookup proven, duplicate-name-same-
-class raises."
+attrs + units land correctly (verified via .to()); objects are keyed by
+mRID (cim-graph's index, populated at the add_to_graph call site), and an
+mRID reused by another object - in any class - raises."
 
 ieee13.cimtbl is parsed and validated through the real Phase 1/2 pipeline
 (no hand-built records) and bound into a real BusBranchModel.
@@ -16,15 +16,14 @@ from pathlib import Path
 
 import pytest
 
-os.environ['CIMG_CIM_PROFILE'] = 'cimhub_2026'
+os.environ['CIMG_CIM_PROFILE'] = 'cim18v17'
 
-import cimgraph.data_profile.cimhub_2026 as cim
+import cimprofiles.cim18.cim18v17 as cim
 from cimgraph.databases import XMLFile
 from cimgraph.models import BusBranchModel
 
 from cimtables import graph_write
 from cimtables.binder import bind_row
-from cimtables.name_index import NameIndex
 from cimtables import parser, validate
 
 SAMPLE_FILE = Path(__file__).parent / 'fixtures' / 'ieee13.cimtbl'
@@ -34,9 +33,8 @@ _TARGET_CLASSES = {'EnergySource', 'BaseFrequency', 'BasePower', 'BaseVoltage'}
 @pytest.fixture
 def network():
     conn = XMLFile(filename=tempfile.mktemp(suffix='.xml'))
-    container = cim.Feeder(name='test_feeder')
+    container = cim.Feeder(mRID='test_feeder')
     net = BusBranchModel(connection=conn, container=container, distributed=False)
-    net.name_index = NameIndex()
     return net
 
 
@@ -78,30 +76,34 @@ def test_plain_scalar_and_unit_attrs_land_correctly(network):
     assert energy_source is not None
 
 
-def test_name_index_populated_at_add_to_graph_call_site(network):
+def test_mrid_indexed_at_add_to_graph_call_site(network):
     bound = _bind_target_rows(network)
     for obj in bound:
         assert network.graph[type(obj)][obj.identifier] is obj
-        assert network.name_index.get(type(obj), obj.name) is obj
+        assert network.find_by_mRID(obj.mRID) is obj
 
 
-def test_resolve_is_o1_lookup_not_a_graph_scan(network):
+def test_mrid_reused_in_another_class_raises(network):
+    # mRIDs are unique within the model (CIM 18), not per class
     _bind_target_rows(network)
-    base_115 = graph_write.resolve(network, cim.BaseVoltage, 'base_115')
-    # Same object identity as what's in network.graph - resolve went through
-    # NameIndex.by_class, not a linear scan over network.graph[cls].values().
-    assert base_115 is network.graph[cim.BaseVoltage][base_115.identifier]
+    with pytest.raises(ValueError, match=r"mRID 'base_115' .* already used by BaseVoltage"):
+        _bind_text(network, 'Object BaseFrequency: mRID=base_115, frequency=60\n')
 
 
-def test_duplicate_name_same_class_raises(network):
-    # Two rows sharing a name get the SAME deterministic UUID (identity.py
-    # seeds off f'{ClassName}:{name}') and so are indistinguishable at the
-    # network.add_to_graph level - this only tests a genuine collision: a
-    # different underlying identifier claiming an already-bound name.
-    _bind_target_rows(network)
-    duplicate = cim.BaseVoltage(name='base_115', mRID='not-the-same-object')
-    with pytest.raises(ValueError, match=r"duplicate name 'base_115'"):
-        graph_write.add_to_graph(network, duplicate)
+def test_name_is_optional_data_not_the_key(network):
+    [first] = _bind_text(network, 'Object BaseVoltage: mRID=bv_4p16kv, name=4.16 kV\n')
+    renamed = cim.BaseVoltage(mRID='bv_4p16kv', name='renamed')
+    assert first.name == '4.16 kV'
+    # the UUID is seeded from the mRID alone, so a rename is the same object
+    assert renamed.identifier == first.identifier
+
+
+def test_fk_to_object_of_wrong_class_raises(network):
+    with pytest.raises(ValueError, match=r"mRID 'bv_1' is a BaseVoltage, not a PerLengthImpedance"):
+        _bind_text(network, (
+            'Object BaseVoltage: mRID=bv_1\n'
+            'Object ACLineSegment: mRID=line_1, PerLengthImpedance=bv_1\n'
+        ))
 
 
 def _bind_text(network, text):
@@ -111,10 +113,10 @@ def _bind_text(network, text):
 
 def test_fk_to_abstract_base_resolves_concrete_subclass(network):
     # ACLineSegment.PerLengthImpedance's range is the abstract
-    # PerLengthImpedance; NameIndex keys the row under PerLengthPhaseImpedance
+    # PerLengthImpedance; the row built a PerLengthPhaseImpedance
     _bind_text(network, (
-        'Object PerLengthPhaseImpedance: name=mtx601, conductorCount=3\n'
-        'Object ACLineSegment: name=line_1, PerLengthImpedance=mtx601\n'
+        'Object PerLengthPhaseImpedance: mRID=mtx601, conductorCount=3\n'
+        'Object ACLineSegment: mRID=line_1, PerLengthImpedance=mtx601\n'
     ))
     line = graph_write.resolve(network, cim.ACLineSegment, 'line_1')
     assert line.PerLengthImpedance is graph_write.resolve(network, cim.PerLengthPhaseImpedance, 'mtx601')
@@ -122,11 +124,11 @@ def test_fk_to_abstract_base_resolves_concrete_subclass(network):
 
 def test_unresolved_fk_raises(network):
     with pytest.raises(ValueError, match=r"PerLengthImpedance 'missing'.*not found"):
-        _bind_text(network, 'Object ACLineSegment: name=line_1, PerLengthImpedance=missing\n')
+        _bind_text(network, 'Object ACLineSegment: mRID=line_1, PerLengthImpedance=missing\n')
 
 
 _PERCENT_END = (
-    'Object PowerTransformerEnd: name=end_1, ratedU (V)=4160, ratedS (kVA)=500, r (percent)=1.1\n'
+    'Object PowerTransformerEnd: mRID=end_1, ratedU (V)=4160, ratedS (kVA)=500, r (percent)=1.1\n'
 )
 
 
@@ -139,7 +141,7 @@ def test_percent_impedance_on_own_rating(network):
 
 def test_percent_impedance_on_from_reference_rating(network):
     _bind_text(network, _PERCENT_END + (
-        'Object TransformerMeshImpedance: name=mesh_1, FromTransformerEnd=end_1, x (percent)=2.0\n'
+        'Object TransformerMeshImpedance: mRID=mesh_1, FromTransformerEnd=end_1, x (percent)=2.0\n'
     ))
     mesh = graph_write.resolve(network, cim.TransformerMeshImpedance, 'mesh_1')
     z_base = 4160 ** 2 / 500e3
@@ -148,7 +150,7 @@ def test_percent_impedance_on_from_reference_rating(network):
 
 def test_percent_impedance_without_base_raises(network):
     with pytest.raises(ValueError, match=r"'percent' impedance needs a z_base"):
-        _bind_text(network, 'Object TransformerMeshImpedance: name=mesh_1, x (percent)=2.0\n')
+        _bind_text(network, 'Object TransformerMeshImpedance: mRID=mesh_1, x (percent)=2.0\n')
 
 
 def test_z_base_prefers_base_ratings_when_class_has_them():

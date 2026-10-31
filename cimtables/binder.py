@@ -12,13 +12,13 @@ of these buckets:
 - the synthetic `phases` shorthand (only where the class has no real
   `phases` attribute) -> connectivity.add_phase_children: Terminal.phases
   plus <Class>Phase children (§3.6)
-- EquipmentContainer -> resolved via resolve_any_subclass (its range is
+- EquipmentContainer -> resolved by mRID via graph_write.resolve (its range is
   always an abstract base: Feeder, Substation, ... - see validate.py's
   reference_target_class) and passed to add_connectivity as the container
   override, not set directly
-- any other reference slot (FK) -> resolved via resolve_any_subclass()
-  against the schema's own range class name and written with set_assc;
-  an unresolved name raises
+- any other reference slot (FK) -> resolved by mRID via graph_write.resolve()
+  against the schema's own range class and written with set_assc;
+  an unresolved mRID raises
 - everything else -> a plain scalar/Qty, written with set_attr (unchanged
   from Phase 3)
 
@@ -46,7 +46,7 @@ from cimgraph.models import GraphModel
 from cimtables import connectivity, graph_write, synthetic, validate
 from cimtables.units import Qty
 
-_SKIP_FIELDS = {'name', 'source_file', 'source_line'}
+_SKIP_FIELDS = {'mRID', 'identifier', 'source_file', 'source_line'}
 _CONTAINER_FIELD = 'EquipmentContainer'
 _FROM_PREFIX = 'From'
 _PHASES_FIELD = 'phases'
@@ -72,11 +72,24 @@ def _winding_z_base(candidates: list[object]) -> float | None:
     return None
 
 
+def _new_object(cim_cls: type, row: object) -> object:
+    """The row's object, its UUID seeded from the row key: the mRID alone (so a
+    rename keeps the UUID), or for an Identity-only class (no mRID field, e.g.
+    PhaseImpedanceData) its optional identifier column, seeded by the same mRID
+    route without storing it. Neither given: a random UUID."""
+    if row.mRID is not None:
+        return cim_cls(mRID=row.mRID)
+    obj = cim_cls()
+    if row.identifier is not None:
+        obj.uuid(mRID=row.identifier)
+    return obj
+
+
 def bind_row(network: GraphModel, row: object, *, obj: object = None, container: object = None) -> object:
     """Validated <Class>Row -> live cim-graph object, added to network.
 
     `obj` lets a caller (ObjectBuilder.from_table) supply an already-created
-    object instead of this function constructing one with cim_cls(name=...) -
+    object instead of this function constructing one with cim_cls(mRID=...) -
     so a builder's own create() (which may do more than a bare constructor
     call, e.g. UUID seeding) stays the single place an object comes into
     being. `container` is an explicit EquipmentContainer override (a
@@ -87,8 +100,7 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
     ref_slots = validate.reference_slots(row_cls_name)
 
     if obj is None:
-        cim_cls_name = row_cls_name.removesuffix('Row')
-        obj = getattr(network.cim, cim_cls_name)(name=row.name)
+        obj = _new_object(getattr(network.cim, row_cls_name.removesuffix('Row')), row)
 
     node_cols: dict[str, str] = {}
     phases: str | None = None
@@ -107,10 +119,10 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
         elif f.name == _PHASES_FIELD and _PHASES_FIELD not in obj.__dataclass_fields__:
             phases = value
         elif f.name == _CONTAINER_FIELD:
-            container = graph_write.resolve_any_subclass(network, network.cim.EquipmentContainer, value)
+            container = graph_write.resolve(network, network.cim.EquipmentContainer, value)
             if container is None:
                 raise ValueError(
-                    f"{row.name!r}: {_CONTAINER_FIELD} {value!r} not found in graph "
+                    f"{row.mRID!r}: {_CONTAINER_FIELD} {value!r} not found in graph "
                     f"(build containers before equipment that references them)"
                 )
         elif f.name in ref_slots:
@@ -122,14 +134,13 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
 
     # FKs first: a TransformerEnd's terminal goes on its PowerTransformer
     from_targets = []
-    for attr, name in deferred_fks:
+    for attr, mRID in deferred_fks:
         target_cls_name = validate.reference_target_class(row_cls_name, attr)
-        # The slot's range is often an abstract base (TransformerEnd,
-        # PerLengthImpedance) while NameIndex keys on the concrete class built
-        target = graph_write.resolve_any_subclass(network, getattr(network.cim, target_cls_name), name)
+        # The slot's range is often an abstract base (TransformerEnd, PerLengthImpedance)
+        target = graph_write.resolve(network, getattr(network.cim, target_cls_name), mRID)
         if target is None:
             raise ValueError(
-                f"{row.name!r}: {attr} {name!r} ({target_cls_name}) not found in graph "
+                f"{row.mRID!r}: {attr} {mRID!r} ({target_cls_name}) not found in graph "
                 f"(declare it before rows that reference it)"
             )
         graph_write.set_assc(obj, network.cim, attr, target)

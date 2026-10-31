@@ -10,27 +10,25 @@ import tempfile
 
 import pytest
 
-os.environ['CIMG_CIM_PROFILE'] = 'cimhub_2026'
+os.environ['CIMG_CIM_PROFILE'] = 'cim18v17'
 
-import cimgraph.data_profile.cimhub_2026 as cim
+import cimprofiles.cim18.cim18v17 as cim
 from cimgraph.databases import XMLFile
 from cimgraph.models import BusBranchModel
 
 from cimtables import connectivity, graph_write
-from cimtables.name_index import NameIndex
 
 
 @pytest.fixture
 def network():
     conn = XMLFile(filename=tempfile.mktemp(suffix='.xml'))
-    container = cim.Feeder(name='test_feeder')
+    container = cim.Feeder(mRID='test_feeder')
     net = BusBranchModel(connection=conn, container=container, distributed=False)
-    net.name_index = NameIndex()
     return net
 
 
 def test_add_connectivity_auto_vivifies_nodes_and_wires_terminals(network):
-    line = cim.ACLineSegment(name='650632')
+    line = cim.ACLineSegment(mRID='650632')
     graph_write.add_to_graph(network, line)
 
     terminals = connectivity.add_connectivity(
@@ -51,7 +49,7 @@ def test_add_connectivity_auto_vivifies_nodes_and_wires_terminals(network):
 
 
 def test_add_connectivity_sets_equipment_container_from_network_default(network):
-    line = cim.ACLineSegment(name='650632')
+    line = cim.ACLineSegment(mRID='650632')
     graph_write.add_to_graph(network, line)
 
     connectivity.add_connectivity(network, line, node_cols={'node1': 'RG60', 'node2': '362'})
@@ -60,7 +58,7 @@ def test_add_connectivity_sets_equipment_container_from_network_default(network)
 
 
 def test_add_connectivity_propagates_container_to_nodes(network):
-    line = cim.ACLineSegment(name='650632')
+    line = cim.ACLineSegment(mRID='650632')
     graph_write.add_to_graph(network, line)
 
     connectivity.add_connectivity(network, line, node_cols={'node1': 'RG60', 'node2': '362'})
@@ -72,12 +70,12 @@ def test_add_connectivity_propagates_container_to_nodes(network):
 
 
 def test_add_connectivity_does_not_overwrite_existing_node_container(network):
-    other_container = cim.Feeder(name='other_feeder')
-    node = cim.ConnectivityNode(name='671')
+    other_container = cim.Feeder(mRID='other_feeder')
+    node = cim.ConnectivityNode(mRID='671')
     graph_write.set_assc(node, cim, 'ConnectivityNodeContainer', other_container)
     graph_write.add_to_graph(network, node)
 
-    line = cim.ACLineSegment(name='670671')
+    line = cim.ACLineSegment(mRID='670671')
     graph_write.add_to_graph(network, line)
     connectivity.add_connectivity(network, line, node_cols={'node1': '670', 'node2': '671'})
 
@@ -85,8 +83,8 @@ def test_add_connectivity_does_not_overwrite_existing_node_container(network):
 
 
 def test_add_connectivity_explicit_container_overrides_network_default(network):
-    explicit_container = cim.Feeder(name='explicit_feeder')
-    line = cim.ACLineSegment(name='650632')
+    explicit_container = cim.Feeder(mRID='explicit_feeder')
+    line = cim.ACLineSegment(mRID='650632')
     graph_write.add_to_graph(network, line)
 
     connectivity.add_connectivity(
@@ -99,14 +97,15 @@ def test_add_connectivity_explicit_container_overrides_network_default(network):
 
 
 def test_add_connectivity_bus_prefix_disambiguates_topological_node(network):
-    line = cim.ACLineSegment(name='line_1_2')
+    line = cim.ACLineSegment(mRID='line_1_2')
     graph_write.add_to_graph(network, line)
 
     terminals = connectivity.add_connectivity(
         network, line, node_cols={'bus1': 'topo_bus_1', 'bus2': 'topo_bus_2'}
     )
 
-    assert graph_write.resolve(network, cim.ConnectivityNode, 'topo_bus_1') is None
+    with pytest.raises(ValueError, match="'topo_bus_1' is a TopologicalNode, not a ConnectivityNode"):
+        graph_write.resolve(network, cim.ConnectivityNode, 'topo_bus_1')
     topo_1 = graph_write.resolve(network, cim.TopologicalNode, 'topo_bus_1')
     topo_2 = graph_write.resolve(network, cim.TopologicalNode, 'topo_bus_2')
     assert topo_1 is not None and topo_2 is not None
@@ -115,8 +114,8 @@ def test_add_connectivity_bus_prefix_disambiguates_topological_node(network):
 
 
 def test_add_connectivity_reuses_same_node_across_calls(network):
-    line_a = cim.ACLineSegment(name='362670')
-    line_b = cim.ACLineSegment(name='670671')
+    line_a = cim.ACLineSegment(mRID='362670')
+    line_b = cim.ACLineSegment(mRID='670671')
     graph_write.add_to_graph(network, line_a)
     graph_write.add_to_graph(network, line_b)
 
@@ -130,7 +129,7 @@ def test_add_connectivity_reuses_same_node_across_calls(network):
 
 
 def test_add_connectivity_unknown_column_prefix_raises(network):
-    line = cim.ACLineSegment(name='650632')
+    line = cim.ACLineSegment(mRID='650632')
     graph_write.add_to_graph(network, line)
 
     with pytest.raises(ValueError, match='not a connectivity column'):
@@ -138,7 +137,7 @@ def test_add_connectivity_unknown_column_prefix_raises(network):
 
 
 def test_add_phase_children_creates_correct_phase_kinds_and_sequence(network):
-    line = cim.ACLineSegment(name='650632')
+    line = cim.ACLineSegment(mRID='650632')
     graph_write.add_to_graph(network, line)
     terminals = connectivity.add_connectivity(
         network, line, node_cols={'node1': 'RG60', 'node2': '362'}
@@ -158,7 +157,7 @@ def test_add_phase_children_creates_correct_phase_kinds_and_sequence(network):
 
 
 def test_add_phase_children_resolves_parent_field_name_not_equal_to_class_name(network):
-    shunt = cim.LinearShuntCompensator(name='cap1')
+    shunt = cim.LinearShuntCompensator(mRID='cap1')
     graph_write.add_to_graph(network, shunt)
 
     terminals = connectivity.add_connectivity(network, shunt, node_cols={'node': '675'})
@@ -170,7 +169,7 @@ def test_add_phase_children_resolves_parent_field_name_not_equal_to_class_name(n
 
 
 def test_add_phase_children_keeps_written_order_and_sets_canonical_terminal_phases(network):
-    line = cim.ACLineSegment(name='632645')
+    line = cim.ACLineSegment(mRID='632645')
     graph_write.add_to_graph(network, line)
     terminals = connectivity.add_connectivity(network, line, node_cols={'node1': '632', 'node2': '645'})
 
@@ -183,7 +182,7 @@ def test_add_phase_children_keeps_written_order_and_sets_canonical_terminal_phas
 
 
 def test_add_phase_children_splits_secondary_tokens(network):
-    load = cim.EnergyConsumer(name='house')
+    load = cim.EnergyConsumer(mRID='ld_house')
     graph_write.add_to_graph(network, load)
     terminals = connectivity.add_connectivity(network, load, node_cols={'node': 'house'})
 
@@ -194,7 +193,7 @@ def test_add_phase_children_splits_secondary_tokens(network):
 
 
 def test_add_phase_children_uses_nearest_base_phase_class(network):
-    breaker = cim.Breaker(name='brkr1')
+    breaker = cim.Breaker(mRID='brkr1')
     graph_write.add_to_graph(network, breaker)
     terminals = connectivity.add_connectivity(network, breaker, node_cols={'node1': '650', 'node2': 'brkr'})
 
@@ -211,14 +210,14 @@ def test_bad_phases_string_raises(phases):
 
 
 def test_add_phase_children_without_terminals_raises(network):
-    load = cim.EnergyConsumer(name='floating')
+    load = cim.EnergyConsumer(mRID='floating')
     with pytest.raises(ValueError, match='needs a node/bus column'):
         connectivity.add_phase_children(network, load, [], phases='A')
 
 
 def test_transformer_end_node_puts_terminal_on_power_transformer(network):
-    xfmr = cim.PowerTransformer(name='xfm1')
-    end = cim.PowerTransformerEnd(name='xfm1_2', endNumber=2)
+    xfmr = cim.PowerTransformer(mRID='xfm1')
+    end = cim.PowerTransformerEnd(mRID='xfm1_2', endNumber=2)
     graph_write.set_assc(end, cim, 'PowerTransformer', xfmr)
 
     [terminal] = connectivity.add_connectivity(network, end, node_cols={'node': '634'})
@@ -227,5 +226,5 @@ def test_transformer_end_node_puts_terminal_on_power_transformer(network):
     assert terminal.ConductingEquipment is xfmr
     assert end.Terminal is terminal
     assert terminal.sequenceNumber == 2
-    assert terminal.ConnectivityNode.name == '634'
+    assert terminal.ConnectivityNode.mRID == '634'
     assert terminal.phases == cim.PhaseCode.ABCN
