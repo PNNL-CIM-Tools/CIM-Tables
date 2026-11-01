@@ -19,6 +19,7 @@ def z_base(obj: object, from_targets: list[object], base_power: CIMUnit | None) 
     2. else the system base (ACLineSegment, EnergySource): obj's own
        BaseVoltage.nominalVoltage and `base_power` (network.base_power).
     Raises ValueError naming what is missing."""
+    
     for candidate in [obj, *from_targets]:
         u_attr, s_attr = ('baseU', 'baseS') if hasattr(candidate, 'baseU') else ('ratedU', 'ratedS')
         if not hasattr(candidate, s_attr):

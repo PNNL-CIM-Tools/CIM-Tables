@@ -8,6 +8,7 @@ these two functions - no per-class node-vs-bus or phase logic anywhere else.
 import re
 import typing
 
+import cimprofiles.cim18.cim18v17.connectivity_unbalanced as CN
 from cimgraph.models import GraphModel
 
 from cimtables import graph_write
@@ -60,7 +61,7 @@ def _terminal_node_field(network: GraphModel, node_obj: object) -> str:
     return 'ConnectivityNode' if isinstance(node_obj, network.cim.ConnectivityNode) else 'TopologicalNode'
 
 
-def _add_end_terminal(network: GraphModel, end: object, node_cols: dict[str, str]) -> object:
+def _add_end_terminal(network: GraphModel, end: CN.TransformerEnd, node_cols: dict[str, str]) -> CN.Terminal:
     """A TransformerEnd row's node (or bus) column: the Terminal belongs to the end's
     PowerTransformer (the ConductingEquipment), sequenceNumber = endNumber,
     and end.Terminal points at it. The PowerTransformer FK must already be set."""
@@ -72,7 +73,7 @@ def _add_end_terminal(network: GraphModel, end: object, node_cols: dict[str, str
         raise ValueError(f"{end.mRID!r}: a node/bus column on a TransformerEnd needs its PowerTransformer and endNumber")
 
     [(col_name, node_mrid)] = node_cols.items()
-    node_obj = _resolve_node(network, col_name, node_mrid)
+    node_obj:CN.ConnectivityNode = _resolve_node(network, col_name, node_mrid)
     if transformer.EquipmentContainer is not None and node_obj.ConnectivityNodeContainer is None:
         graph_write.set_assc(node_obj, cim, 'ConnectivityNodeContainer', transformer.EquipmentContainer)
 
@@ -84,8 +85,8 @@ def _add_end_terminal(network: GraphModel, end: object, node_cols: dict[str, str
     return terminal
 
 
-def add_connectivity(network: GraphModel, obj: object, *, node_cols: dict[str, str],
-                      container: object = None) -> list[object]:
+def add_connectivity(network: GraphModel, obj: CN.ConductingEquipment, *, node_cols: dict[str, str],
+                      container: object = None) -> list[CN.Terminal]:
     """node_cols is the already-disambiguated {'node1': 'busA', 'bus2': 'busB', ...}
     slice of a <Class>Row (node/bus mRIDs) - the caller picks which of the row's
     fields are connectivity columns. Auto-vivifies any mRID not found via resolve().
@@ -105,7 +106,7 @@ def add_connectivity(network: GraphModel, obj: object, *, node_cols: dict[str, s
 
     terminals = []
     for i, (col_name, node_mrid) in enumerate(node_cols.items(), start=1):
-        node_obj = _resolve_node(network, col_name, node_mrid)
+        node_obj:CN.ConnectivityNode = _resolve_node(network, col_name, node_mrid)
 
         if has_container and node_obj.ConnectivityNodeContainer is None:
             graph_write.set_assc(node_obj, cim, 'ConnectivityNodeContainer', resolved_container)
@@ -163,8 +164,8 @@ def _delta_pairs(tokens: list[str]) -> list[list[str]]:
     return [[tokens[i], tokens[(i + 1) % len(tokens)]] for i in range(len(tokens))]
 
 
-def add_phase_children(network: GraphModel, obj: object, terminals: list[object],
-                        *, phases: str) -> list[object]:
+def add_phase_children(network: GraphModel, obj: CN.ConductingEquipment, terminals: list[CN.Terminal],
+                        *, phases: str) -> list[CN.PowerSystemResource]:
     """phases='ABCN' -> per-phase children (e.g. ACLineSegmentPhase) per §3.6,
     wired to obj. Every terminal gets the canonical PhaseCode of the set.
 

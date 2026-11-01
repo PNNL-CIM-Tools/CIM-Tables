@@ -32,6 +32,9 @@ from cimgraph.models import GraphModel
 
 from cimtables.units import Qty
 
+from typing import TypeVar, Type
+
+T = TypeVar('T')
 
 def _part_field(part: ModuleType, obj: object, attr: str) -> dataclasses.Field:
     """The dataclasses.Field for `attr` on part's class of the same name as
@@ -184,7 +187,7 @@ def resolve(network: GraphModel, cim_cls: type, mRID: str) -> object | None:
 
 
 def set_assc_from_mrid(network: GraphModel, obj: object, part: ModuleType, assc: str,
-                        cim_cls: type, mRID: str) -> object:
+                        cim_cls: Type[T], mRID: str|None) -> T:
     """resolve() + set_assc() in one call, for the common required-FK shape
     every add_<part> method otherwise hand-writes: resolve the target by
     mRID, raise a consistent ValueError if it's missing, else wire it up.
@@ -193,6 +196,7 @@ def set_assc_from_mrid(network: GraphModel, obj: object, part: ModuleType, assc:
     Leave a multi-target check (e.g. two ends resolved together with one
     combined error message) as free-standing resolve()/set_assc() calls -
     this helper is for the single-target case only."""
+    
     target = resolve(network, cim_cls, mRID)
     if target is None:
         raise ValueError(
