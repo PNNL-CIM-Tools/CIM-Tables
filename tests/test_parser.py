@@ -7,10 +7,13 @@ through Phase 2's validate() so the whole pipe is exercised with a real
 parser instead of hand-built RawRecords.
 """
 
+import os
 from pathlib import Path
 
 import lark
 import pytest
+
+os.environ['CIMG_CIM_PROFILE'] = 'cim18v17'
 
 from cimtables import parser, validate
 
@@ -18,8 +21,8 @@ SAMPLES_DIR = Path(__file__).parent / 'fixtures'
 
 
 def _parse(text: str):
-    records, profile = parser.parse_text(text, source_file='<test>')
-    return records, profile
+    records, header = parser.parse_text(text, source_file='<test>')
+    return records, header
 
 
 # --- isolated constructs ---------------------------------------------------
@@ -205,13 +208,38 @@ def test_scientific_notation_and_negative_numbers():
 
 
 def test_profile_statement():
-    records, profile = _parse(
+    records, header = _parse(
         'Profile = cim18v17\n'
         '\n'
         'Object BaseFrequency: name=base_freq, frequency=60\n'
     )
-    assert profile == 'cim18v17'
+    assert header.profile == 'cim18v17'
     assert len(records) == 1
+
+
+def test_authority_and_model_statements():
+    records, header = _parse(
+        'Profile = cim18v17\n'
+        'Authority = https://github.com/PNNL-CIM-Tools/CIMTBL-Models\n'
+        'Model = IEEE 13 node test feeder\n'
+        'Object BaseFrequency: name=base_freq, frequency=60\n'
+    )
+    assert header == parser.Header(profile='cim18v17',
+                                   authority='https://github.com/PNNL-CIM-Tools/CIMTBL-Models',
+                                   model='IEEE 13 node test feeder')
+    assert len(records) == 1
+
+
+def test_setting_declared_twice_raises():
+    with pytest.raises(ValueError, match='Model is declared twice'):
+        _parse('Model = a\nModel = b\n')
+
+
+def test_import_model_mismatch_raises(tmp_path):
+    (tmp_path / 'catalog.cimtbl').write_text('Model = catalog\n')
+    (tmp_path / 'main.cimtbl').write_text('Model = ieee13\nImport catalog.cimtbl\n')
+    with pytest.raises(ValueError, match='Model mismatch'):
+        parser.parse_file(tmp_path / 'main.cimtbl')
 
 
 def test_same_class_two_header_shapes():
@@ -240,7 +268,7 @@ def test_malformed_unterminated_unit_raises():
 # --- import splicing ---------------------------------------------------
 
 def test_import_splices_records_from_file():
-    records, profile = parser.parse_file(SAMPLES_DIR / 'ieee13.cimtbl')
+    records, header = parser.parse_file(SAMPLES_DIR / 'ieee13.cimtbl')
     wire_records = [r for r in records if r.cim_class == 'OverheadWireInfo']
     # wire_infos.cimtbl has two `Table OverheadWireInfo` blocks (3 rows total)
     assert len(wire_records) == 3
@@ -268,17 +296,17 @@ def test_import_profile_inherited_when_absent_locally(tmp_path):
         'Object BaseFrequency: name=base_freq, frequency=60\n'
     )
     (tmp_path / 'main.cimtbl').write_text('Import catalog.cimtbl\n')
-    records, profile = parser.parse_file(tmp_path / 'main.cimtbl')
-    assert profile == 'cim18v17'
+    records, header = parser.parse_file(tmp_path / 'main.cimtbl')
+    assert header.profile == 'cim18v17'
     assert len(records) == 1
 
 
 # --- end to end: real sample files -----------------------------------------
 
 def test_ieee13_parses_end_to_end():
-    records, profile = parser.parse_file(SAMPLES_DIR / 'ieee13.cimtbl')
+    records, header = parser.parse_file(SAMPLES_DIR / 'ieee13.cimtbl')
     assert len(records) == 75
-    assert profile is None
+    assert header == parser.Header()
 
     line_1_2 = next(r for r in records if r.fields.get('mRID') == 'line_1_2')
     assert line_1_2.fields['r'] == '1.93800E-2'
@@ -292,8 +320,8 @@ def test_ieee13_parses_end_to_end():
 
 
 def test_ieee14_parses_end_to_end():
-    records, profile = parser.parse_file(SAMPLES_DIR / 'ieee14.cimtbl')
-    assert profile is None
+    records, header = parser.parse_file(SAMPLES_DIR / 'ieee14.cimtbl')
+    assert header == parser.Header()
     classes = [r.cim_class for r in records]
     assert classes == ['BaseFrequency', 'BasePower', 'BaseVoltage', 'ACLineSegment']
     base_voltage = next(r for r in records if r.cim_class == 'BaseVoltage')

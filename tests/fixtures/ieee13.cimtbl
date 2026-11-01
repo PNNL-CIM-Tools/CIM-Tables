@@ -139,7 +139,8 @@ Table PowerTransformerEnd: mRID, node, endNumber, r (percent), x (percent), rate
 
 # Transformer Instance
 
-Object PowerTransformer: mRID = padmount_2341, Template = padmount_template
+# The instance links to its template via TransformerTank.TankConfiguration (see CIMTBL-Models padmount_example)
+Object PowerTransformer: mRID = padmount_2341
 Table PowerTransformerEnd: mRID, node, endNumber
     pad_2341_1, 671, 1
     pad_2341_2, House, 2

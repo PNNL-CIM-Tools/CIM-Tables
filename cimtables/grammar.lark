@@ -15,8 +15,12 @@ statement: object_stmt
          | table_stmt
          | import_stmt
          | profile_stmt
+         | authority_stmt
+         | model_stmt
 
 profile_stmt: PROFILE "=" NAME _NL+
+authority_stmt: AUTHORITY "=" VALUE _NL+
+model_stmt: MODEL "=" VALUE _NL+
 
 import_stmt: IMPORT FILENAME _NL+
 
@@ -37,6 +41,8 @@ cell: VALUE -> value
     | -> blank
 
 PROFILE.3: "Profile"
+AUTHORITY.3: "Authority"
+MODEL.3: "Model"
 IMPORT.3: "Import"
 OBJECT.3: "Object"
 TABLE.3: "Table"

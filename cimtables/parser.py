@@ -1,6 +1,6 @@
 """Phase 1: Lark grammar -> records (design: CIMTBL_DESIGN.md §3, §12.1)."""
 
-import os
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 
 import lark
@@ -40,6 +40,20 @@ def _header_cell_name_unit_default(header_cell_node: lark.Tree) -> tuple[str, st
         else:
             default = _cell_text(child)
     return name, unit, default
+
+
+@dataclass(frozen=True)
+class Header:
+    """A file's settings statements, each None if absent: `Profile =` (the CIM
+    profile, §3.9), `Authority =` and `Model =` (the model authority URI and
+    model name that UUIDs are seeded under, see cimgraph.core.set_model_scope).
+    Applied by cimtables.load / load_model, never by the parser."""
+    profile: str | None = None
+    authority: str | None = None
+    model: str | None = None
+
+
+_HEADER_STATEMENTS = {'profile_stmt': 'profile', 'authority_stmt': 'authority', 'model_stmt': 'model'}
 
 
 class _RecordBuilder(lark.Transformer):
@@ -120,19 +134,22 @@ def _ensure_trailing_newline(text: str) -> str:
     return text if text.endswith('\n') else text + '\n'
 
 
-def parse_text(text: str, source_file: str) -> tuple[list[RawRecord], str | None]:
-    """Parse `.cimtbl` source already in memory. Returns (records, profile)
-    - `profile` is the file's own `Profile=` value (§3.9), or None if absent.
+def parse_text(text: str, source_file: str) -> tuple[list[RawRecord], Header]:
+    """Parse `.cimtbl` source already in memory. Returns (records, header)
+    - `header` holds the file's own Profile/Authority/Model statements.
     Import statements are NOT resolved here (no filesystem access at this
     layer); use parse_file for a real file that may contain them."""
     tree = _LARK_PARSER.parse(_ensure_trailing_newline(text))
 
-    profile: str | None = None
+    header = Header()
     statements: list[RawRecord | list[RawRecord] | tuple[str, str]] = []
     for statement in tree.children:
         node = statement.children[0]
-        if node.data == 'profile_stmt':
-            profile = str(node.children[1])
+        if node.data in _HEADER_STATEMENTS:
+            setting = _HEADER_STATEMENTS[node.data]
+            if getattr(header, setting) is not None:
+                raise ValueError(f'{source_file}:{node.meta.line}: {node.children[0]} is declared twice')
+            header = replace(header, **{setting: str(node.children[1]).strip()})
             continue
         if node.data == 'import_stmt':
             statements.append(('__import__', str(node.children[1])))
@@ -153,43 +170,49 @@ def parse_text(text: str, source_file: str) -> tuple[list[RawRecord], str | None
                 records.extend(built)
             else:
                 records.append(built)
-    return records, profile
+    return records, header
 
 
-def parse_file(path: str | Path) -> tuple[list[RawRecord], str | None]:
+def _merge_header(path: Path, header: Header, import_path: Path, imported: Header) -> Header:
+    """An Import's settings fill the ones `path` (or an earlier Import) left
+    unset; one that disagrees with an already-set value raises."""
+    for setting in fields(Header):
+        value, imported_value = getattr(header, setting.name), getattr(imported, setting.name)
+        if value is None:
+            header = replace(header, **{setting.name: imported_value})
+        elif imported_value is not None and imported_value != value:
+            raise ValueError(
+                f"{setting.name.capitalize()} mismatch: {path} declares {value!r} but "
+                f"import {import_path} declares {imported_value!r}"
+            )
+    return header
+
+
+def parse_file(path: str | Path) -> tuple[list[RawRecord], Header]:
     """The public Phase 1 entry point (§12.1): a .cimtbl file -> the fully-
-    composed, ordered RawRecord list Phase 2 consumes, plus the active
-    Profile (§3.9) if any statement in the file/Import chain set one.
+    composed, ordered RawRecord list Phase 2 consumes, plus the Header of
+    Profile/Authority/Model settings the file/Import chain declared.
 
     Import statements (§3.3) are resolved here by textual composition: each
     imported file is recursively parsed (relative to the importing file's
     directory) and its records spliced in at that position. Import records
-    never reach the returned list themselves. Profile= is consumed before
-    any RawRecord is built; one per file/Import chain (§3.9) - an imported
-    file declaring a *different* Profile= than one already set earlier in
-    the chain is a fail-fast error, not a silent override.
+    never reach the returned list themselves. Each setting is declared at
+    most once per file/Import chain (§3.9) - an imported file declaring a
+    *different* value than one already set earlier in the chain is a
+    fail-fast error, not a silent override. The parser applies none of them.
     """
     path = Path(path)
     text = path.read_text()
-    raw_records, profile = parse_text(text, source_file=str(path))
+    raw_records, header = parse_text(text, source_file=str(path))
 
     records: list[RawRecord] = []
     for record in raw_records:
         if record.cim_class == '__import__':
             import_path = path.parent / record.fields['path']
-            imported_records, imported_profile = parse_file(import_path)
+            imported_records, imported_header = parse_file(import_path)
             records.extend(imported_records)
-            if profile is None:
-                profile = imported_profile
-            elif imported_profile is not None and imported_profile != profile:
-                raise ValueError(
-                    f"Profile mismatch: {path} declares {profile!r} but "
-                    f"import {import_path} declares {imported_profile!r}"
-                )
+            header = _merge_header(path, header, import_path, imported_header)
             continue
         records.append(record)
 
-    if profile is not None:
-        os.environ['CIMG_CIM_PROFILE'] = profile
-
-    return records, profile
+    return records, header

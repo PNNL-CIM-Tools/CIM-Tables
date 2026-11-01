@@ -143,3 +143,24 @@ def test_transformer_end_bus_column_wires_topological_node(network, cim):
     ))
     terminal = graph_write.resolve(network, cim.PowerTransformerEnd, 'sub3_2').Terminal
     assert terminal.TopologicalNode is graph_write.resolve(network, cim.TopologicalNode, '650')
+
+
+def test_wire_configuration_is_a_plain_reference(network, cim):
+    """A line template is the cim18v17 association ACLineSegment.WireConfiguration,
+    bound like any other reference column (no DSL `Template` column)."""
+    _bind_text(network, (
+        'Object WireSpacing: mRID=spc_500601\n'
+        'Object WireConfiguration: mRID=wc_601, numberOfPhases=3, WireSpacing=spc_500601\n'
+        'Table ACLineSegment: mRID, node1, node2, phases, length (ft), WireConfiguration\n'
+        '    ln_650632, rg60, 632, ABC, 2000, wc_601\n'
+        '    ln_632671, 632,  671, ABC, 2000, wc_601\n'
+    ))
+    template = graph_write.resolve(network, cim.WireConfiguration, 'wc_601')
+    lines = [graph_write.resolve(network, cim.ACLineSegment, mRID) for mRID in ('ln_650632', 'ln_632671')]
+    assert all(line.WireConfiguration is template for line in lines)
+    assert template.WireSpacing is graph_write.resolve(network, cim.WireSpacing, 'spc_500601')
+
+
+def test_template_column_is_rejected(network, cim):
+    with pytest.raises(validate.CimtblValidationError, match="no attribute 'Template'"):
+        _bind_text(network, 'Object ACLineSegment: mRID=ln_1, Template=wc_601\n')

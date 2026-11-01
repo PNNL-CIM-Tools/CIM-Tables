@@ -8,7 +8,7 @@ Profile= selected, via cim-graph's own get_cim_profile()) instead of
 constructing a generated LinkML class - any class in the selected profile is
 automatically valid, with no per-version curation file to maintain. The only
 columns a CIM profile can never explain are this package's own connectivity/
-phases/Template shorthand (synthetic.py), which are added to every
+phases shorthand (synthetic.py), which are added to every
 <Class>Row unconditionally.
 
 A field is classified the same way graph_write.py already classifies one
