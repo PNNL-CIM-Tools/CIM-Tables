@@ -30,22 +30,7 @@ from types import ModuleType
 from cimprofiles.units.units import CIMUnit
 from cimgraph.models import GraphModel
 
-from cimtables.impedance import relative_to_ohm, relative_to_siemens
 from cimtables.units import Qty
-
-
-def _cim_unit_type(obj: object, attr: str) -> type[CIMUnit] | None:
-    """The CIMUnit subclass (Voltage, ActivePower, ...) a quantity attr's
-    `float | <CIMUnitType>` union carries, or None if the attr isn't
-    quantity-typed. Resolved off obj's own class, not `network.cim` - it's
-    exactly the module type(obj) was defined in, and set_attr takes no
-    network param."""
-    hints = typing.get_type_hints(type(obj))
-    union_args = typing.get_args(hints.get(attr))
-    for arg in union_args:
-        if isinstance(arg, type) and issubclass(arg, CIMUnit):
-            return arg
-    return None
 
 
 def _part_field(part: ModuleType, obj: object, attr: str) -> dataclasses.Field:
@@ -70,15 +55,27 @@ def _part_field(part: ModuleType, obj: object, attr: str) -> dataclasses.Field:
 
 
 def set_attr(obj: object, part: ModuleType, attr: str, value: object, *,
-             z_base: float | None = None, y_base: float | None = None) -> None:
-    """Set a plain scalar or Qty onto a live cim-graph object's attribute.
+             z_base: float | None = None) -> None:
+    """Set a plain scalar, CIMUnit or Qty onto a live cim-graph object's attribute.
 
-    A pu/percent Qty on an ohm-typed attribute (r, x, r0, ...) is converted
-    to ohms against `z_base` (ohms, resolved by the caller); raises if none
-    was given. A pu/percent Qty on a siemens-typed attribute (b, g, bch,
-    gch, ...) is converted to siemens against `y_base` (siemens) the same
-    way; raises if none was given. Relative Qtys on non-impedance/
-    non-admittance attributes (PerCent) pass through unchanged.
+    The value must match the attribute's declared type, as cim-graph's own
+    create_value enforces when it reads a model:
+    - a bool field takes only a bool (the str 'false' is truthy, so it is
+      rejected, not parsed - parsing text is validate.py's job), and a bool is
+      never accepted as a number
+    - a number on a CIMUnit field is wrapped in that CIMUnit, read as SI base
+      (`Voltage(4160)` is 4160 V); on a plain float field it becomes a float
+    - a CIMUnit is converted into the field's own CIMUnit class (the classes
+      are per profile module); pint raises on a dimension mismatch
+    - a Qty is converted from its `(unit)` into the field's CIMUnit. A
+      pu/percent Qty on an ohm-typed attribute (r, x, r0, ...) is multiplied
+      by `z_base` (ohms, see impedance.z_base); on a siemens-typed one (b, g,
+      bch, ...) it is divided by it (admittance base = 1/z_base). Raises if no
+      z_base was given. Relative Qtys on other attributes (PerCent) are
+      converted like any other unit.
+    - anything else must be an instance of a declared type (str, int, UUID,
+      an Enum, ...)
+    Raises TypeError on a mismatch.
 
     Raises ValueError if `attr` is not a real field of part's same-named
     class, or if it IS a field but an association (has metadata['inverse'])
@@ -94,31 +91,39 @@ def set_attr(obj: object, part: ModuleType, attr: str, value: object, *,
         setattr(obj, attr, None)
         return
 
+    hint = typing.get_type_hints(type(obj))[attr]
+    declared = [t for t in typing.get_args(hint) or (hint,) if isinstance(t, type) and t is not type(None)]
+    cim_unit_type = next((t for t in declared if issubclass(t, CIMUnit)), None)
+    where = f"{type(obj).__name__}.{attr}"
+
     if isinstance(value, Qty):
-        cim_unit_type = _cim_unit_type(obj, attr)
         if cim_unit_type is None:
-            raise ValueError(
-                f"{type(obj).__name__}.{attr} is not a CIMUnit-typed attribute, "
-                f"but got a Qty ({value!r})"
-            )
+            raise ValueError(f"{where} is not a CIMUnit-typed attribute, but got a Qty ({value!r})")
         unit_name = cim_unit_type(0).unit.name
         if value.is_relative() and unit_name in ('ohm', 'S'):
-            base, base_unit, convert = (
-                (z_base, 'z_base', relative_to_ohm) if unit_name == 'ohm'
-                else (y_base, 'y_base', relative_to_siemens)
-            )
-            if base is None:
+            if z_base is None:
                 raise ValueError(
-                    f"{type(obj).__name__}.{attr}: {value.unit!r} value needs a {base_unit}, "
-                    f"but none could be resolved for {getattr(obj, 'mRID', obj)!r}"
+                    f"{where}: {value.unit!r} value needs a z_base, "
+                    f"but none was given for {getattr(obj, 'mRID', obj)!r}"
                 )
-            setattr(obj, attr, cim_unit_type(convert(value, base), unit_name))
-            return
-        if value.unit:
-            setattr(obj, attr, cim_unit_type(value.value, value.unit))
+            per_unit = value.value / 100 if value.unit == 'percent' else value.value
+            si_value = per_unit * z_base if unit_name == 'ohm' else per_unit / z_base
+            value = cim_unit_type(si_value)
+        elif value.unit:
+            value = cim_unit_type(value.value, value.unit)
         else:
-            setattr(obj, attr, cim_unit_type(value.value))
-        return
+            value = cim_unit_type(value.value)
+    elif isinstance(value, CIMUnit) and cim_unit_type is not None:
+        value = cim_unit_type(value)
+    elif isinstance(value, bool) or bool in declared:
+        if not (isinstance(value, bool) and bool in declared):
+            raise TypeError(f"{where} expects {[t.__name__ for t in declared]}, got {value!r}")
+    elif isinstance(value, (int, float)) and cim_unit_type is not None:
+        value = cim_unit_type(value)
+    elif isinstance(value, (int, float)) and float in declared:
+        value = float(value)
+    elif not isinstance(value, tuple(declared)):
+        raise TypeError(f"{where} expects {[t.__name__ for t in declared]}, got {value!r}")
 
     setattr(obj, attr, value)
 

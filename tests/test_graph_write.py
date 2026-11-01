@@ -74,16 +74,66 @@ def test_set_attr_relative_ohm_without_z_base_raises():
         graph_write.set_attr(line, cim, 'r', Qty(2.0, 'percent'))
 
 
-def test_set_attr_relative_siemens_converts_against_y_base():
+def test_set_attr_relative_siemens_divides_by_z_base():
     line = cim.ACLineSegment(mRID='line')
-    graph_write.set_attr(line, cim, 'bch', Qty(5.0, 'percent'), y_base=1000.0)
+    graph_write.set_attr(line, cim, 'bch', Qty(5.0, 'percent'), z_base=0.001)
     assert line.bch.to('S') == pytest.approx(50.0)
 
 
-def test_set_attr_relative_siemens_without_y_base_raises():
+def test_set_attr_relative_siemens_without_z_base_raises():
     line = cim.ACLineSegment(mRID='line')
-    with pytest.raises(ValueError, match='needs a y_base'):
+    with pytest.raises(ValueError, match='needs a z_base'):
         graph_write.set_attr(line, cim, 'bch', Qty(5.0, 'percent'))
+
+
+def test_set_attr_bool_field_rejects_str():
+    # 'false' is truthy - stored as-is it would read as an open switch
+    switch = cim.Switch(mRID='sw')
+    with pytest.raises(TypeError, match='Switch.normalOpen'):
+        graph_write.set_attr(switch, cim, 'normalOpen', 'false')
+    with pytest.raises(TypeError):
+        graph_write.set_attr(switch, cim, 'normalOpen', 0)
+    graph_write.set_attr(switch, cim, 'normalOpen', False)
+    assert switch.normalOpen is False
+
+
+def test_set_attr_number_field_rejects_bool_and_str():
+    switch = cim.Switch(mRID='sw')
+    with pytest.raises(TypeError):
+        graph_write.set_attr(switch, cim, 'ratedCurrent', True)
+    with pytest.raises(TypeError):
+        graph_write.set_attr(switch, cim, 'ratedCurrent', '400')
+
+
+def test_set_attr_int_field_rejects_float_and_bool():
+    terminal = cim.Terminal(mRID='t')
+    with pytest.raises(TypeError):
+        graph_write.set_attr(terminal, cim, 'sequenceNumber', 1.0)
+    with pytest.raises(TypeError):
+        graph_write.set_attr(terminal, cim, 'sequenceNumber', True)
+    graph_write.set_attr(terminal, cim, 'sequenceNumber', 1)
+    assert terminal.sequenceNumber == 1
+
+
+def test_set_attr_number_on_cimunit_field_is_wrapped_as_si():
+    bv = cim.BaseVoltage(mRID='bv')
+    graph_write.set_attr(bv, cim, 'nominalVoltage', 4160)
+    assert isinstance(bv.nominalVoltage, cim.Voltage)
+    assert bv.nominalVoltage.to('kV') == pytest.approx(4.16)
+
+
+def test_set_attr_cimunit_is_converted_into_field_unit_class():
+    import cimprofiles.cim18.cim18v17.connectivity_unbalanced as CN
+    bv = cim.BaseVoltage(mRID='bv')
+    graph_write.set_attr(bv, cim, 'nominalVoltage', CN.Voltage(4.16, 'kV'))
+    assert type(bv.nominalVoltage) is cim.Voltage
+    assert bv.nominalVoltage.to('V') == pytest.approx(4160)
+
+
+def test_set_attr_cimunit_dimension_mismatch_raises():
+    bv = cim.BaseVoltage(mRID='bv')
+    with pytest.raises(Exception, match='[Dd]imensionality|Cannot convert'):
+        graph_write.set_attr(bv, cim, 'nominalVoltage', cim.ActivePower(1, 'MW'))
 
 
 def test_set_attr_unknown_field_raises():

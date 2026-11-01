@@ -22,7 +22,7 @@ import cimprofiles.cim18.cim18v17 as cim
 from cimgraph.databases import XMLFile
 from cimgraph.models import BusBranchModel
 
-from cimtables import graph_write, impedance
+from cimtables import graph_write
 from cimtables.binder import bind_row
 from cimtables import parser, validate
 
@@ -149,54 +149,48 @@ def test_percent_impedance_on_from_reference_rating(network):
 
 
 def test_percent_impedance_without_base_raises(network):
-    with pytest.raises(ValueError, match=r"'percent' value needs a z_base"):
+    with pytest.raises(ValueError, match=r"needs a rated From\* reference"):
         _bind_text(network, 'Object TransformerMeshImpedance: mRID=mesh_1, x (percent)=2.0\n')
+
+
+def test_percent_impedance_on_unrated_end_raises_instead_of_system_base(network):
+    # PowerTransformerEnd also has a BaseVoltage - a missing ratedS must not
+    # silently fall back to the system base
+    with pytest.raises(ValueError, match=r"needs both ratedU and ratedS"):
+        _bind_text(network, _PU_LINE + (
+            'Object PowerTransformerEnd: mRID=end_1, BaseVoltage=bv_115kv, ratedU (kV)=115, r (percent)=1.1\n'
+        ))
 
 
 _PU_LINE = 'Object BaseVoltage: mRID=bv_115kv, nominalVoltage (kV)=115\n'
 
 
-def test_pu_impedance_falls_back_to_system_base_when_no_rating_pair(network, monkeypatch):
-    # ACLineSegment has no ratedU/ratedS/baseU/baseS at all - resolve_winding_z_base
-    # finds nothing on it, so bind_row must fall back to CIMG_SYSTEM_MVA_BASE +
-    # the line's own BaseVoltage, same as cimbuilder's ACLineSegmentBuilder.
-    monkeypatch.setenv('CIMG_SYSTEM_MVA_BASE', '100')
-    impedance.get_system_mva_base.cache_clear()
-    try:
-        _bind_text(network, _PU_LINE + (
-            'Object ACLineSegment: mRID=line_1, BaseVoltage=bv_115kv, '
-            'r (pu)=0.01938, x (pu)=0.05917, bch (pu)=0.0528\n'
-        ))
-    finally:
-        impedance.get_system_mva_base.cache_clear()
-
+def test_pu_impedance_on_system_base_when_no_rating_pair(network):
+    # ACLineSegment has no rating pair: network.base_power (default 100 MVA)
+    # and the line's own BaseVoltage
+    _bind_text(network, _PU_LINE + (
+        'Object ACLineSegment: mRID=line_1, BaseVoltage=bv_115kv, '
+        'r (pu)=0.01938, x (pu)=0.05917, bch (pu)=0.0528\n'
+    ))
     line = graph_write.resolve(network, cim.ACLineSegment, 'line_1')
     z_base = 115000 ** 2 / 100e6
-    y_base = 1.0 / z_base
     assert line.r.to('ohm') == pytest.approx(0.01938 * z_base)
     assert line.x.to('ohm') == pytest.approx(0.05917 * z_base)
-    assert line.bch.to('S') == pytest.approx(0.0528 * y_base)
+    assert line.bch.to('S') == pytest.approx(0.0528 / z_base)
 
 
-def test_pu_impedance_without_system_mva_base_raises(network, monkeypatch):
-    monkeypatch.delenv('CIMG_SYSTEM_MVA_BASE', raising=False)
-    impedance.get_system_mva_base.cache_clear()
-    try:
-        with pytest.raises(ValueError, match=r"'pu' value needs a z_base"):
-            _bind_text(network, _PU_LINE + (
-                'Object ACLineSegment: mRID=line_1, BaseVoltage=bv_115kv, r (pu)=0.01938\n'
-            ))
-    finally:
-        impedance.get_system_mva_base.cache_clear()
+def test_pu_impedance_uses_network_base_power(network):
+    network.base_power = cim.ApparentPower(10, 'MVA')
+    _bind_text(network, _PU_LINE + (
+        'Object ACLineSegment: mRID=line_1, BaseVoltage=bv_115kv, r (pu)=0.01938\n'
+    ))
+    line = graph_write.resolve(network, cim.ACLineSegment, 'line_1')
+    assert line.r.to('ohm') == pytest.approx(0.01938 * 115000 ** 2 / 10e6)
 
 
-def test_pu_impedance_without_base_voltage_raises(network, monkeypatch):
-    monkeypatch.setenv('CIMG_SYSTEM_MVA_BASE', '100')
-    impedance.get_system_mva_base.cache_clear()
-    try:
-        with pytest.raises(ValueError, match=r"'pu' value needs a z_base"):
-            _bind_text(network, 'Object ACLineSegment: mRID=line_1, r (pu)=0.01938\n')
-    finally:
-        impedance.get_system_mva_base.cache_clear()
+def test_pu_impedance_without_base_voltage_raises(network):
+    with pytest.raises(ValueError, match=r"BaseVoltage with nominalVoltage"):
+        _bind_text(network, 'Object ACLineSegment: mRID=line_1, r (pu)=0.01938\n')
+
 
 

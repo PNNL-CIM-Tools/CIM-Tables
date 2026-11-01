@@ -23,18 +23,12 @@ of these buckets:
   from Phase 3)
 
 pu/percent impedances/admittances (r, x, bch, ...) are written last,
-converted to ohms/siemens via _resolve_relative_bases, which tries the
-winding-base rule first (cimtables.impedance.resolve_winding_z_base/
-_y_base: the row's own object if it carries a rating pair
-(PowerTransformerEnd), else the object its From* reference points at -
-TransformerMeshImpedance's FromWinding/FromTransformerEnd, CIM: "the 'from'
-end ... determines the voltage reference"; TransformerWinding's baseU/baseS
-are the base with no fallback to ratedU, which is phase-to-phase and would
-silently be 3x/4x wrong), then falls back to the system-base rule
-(CIMG_SYSTEM_MVA_BASE + the row's own already-resolved BaseVoltage) for a
-class with no rating pair at all (ACLineSegment, EnergySource). See
-.development/PERCENT_IMPEDANCE_BASE.md for why, and for the open IEC WG
-clarifications the winding-base rule stands in for.
+converted to ohms/siemens against impedance.z_base: the rating pair of the
+row's own object if its class is rated (PowerTransformerEnd), else of its
+From* reference target (TransformerMeshImpedance's FromWinding/
+FromTransformerEnd), else the system base (the row's BaseVoltage and
+network.base_power) for a class with no rating pair (ACLineSegment,
+EnergySource). See .development/PERCENT_IMPEDANCE_BASE.md.
 
 set_attr/set_assc are called with network.cim as `part` throughout - the
 documented no-op part-check (graph_write.py's module docstring) appropriate
@@ -45,7 +39,6 @@ to check against. See CIM-Builder's development/PROFILE_RESOLUTION.md.
 import dataclasses
 
 from cimgraph.models import GraphModel
-from cimgraph.core import get_system_mva_base
 from cimtables import connectivity, graph_write, impedance, synthetic, validate
 from cimtables.units import Qty
 
@@ -143,34 +136,10 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
         connectivity.add_phase_children(network, obj, terminals, phases=phases)
 
     if relative_qtys:
-        z_base, y_base = _resolve_relative_bases(obj, from_targets)
+        z_base = impedance.z_base(obj, from_targets, network.base_power)
         for attr, qty in relative_qtys:
-            graph_write.set_attr(obj, network.cim, attr, qty, z_base=z_base, y_base=y_base)
+            graph_write.set_attr(obj, network.cim, attr, qty, z_base=z_base)
 
     graph_write.add_to_graph(network, obj)
     return obj
 
-
-def _resolve_relative_bases(obj: object, from_targets: list[object]) -> tuple[float | None, float | None]:
-    """(z_base ohms, y_base siemens) for `obj`'s own relative Qtys - the
-    winding-base rule (resolve_winding_z_base/_y_base: obj's own rating pair,
-    else a From* target's) tried first, so TransformerWinding/
-    PowerTransformerEnd rows are unaffected; if that finds nothing (obj has
-    no rating pair at all - ACLineSegment/EnergySource), falls back to the
-    system-base rule (CIMG_SYSTEM_MVA_BASE + obj's own BaseVoltage, same as
-    cimbuilder's ACLineSegmentBuilder) when obj has an already-resolved
-    BaseVoltage. None/None if neither rule finds a base - set_attr then
-    fails fast if a relative value actually needed one."""
-    candidates = [obj, *from_targets]
-    z_base = impedance.resolve_winding_z_base(candidates)
-    y_base = impedance.resolve_winding_y_base(candidates)
-    if z_base is not None or y_base is not None:
-        return z_base, y_base
-
-    base_voltage = getattr(obj, 'BaseVoltage', None)
-    system_mva = get_system_mva_base()
-    if base_voltage is None or system_mva is None:
-        return None, None
-    rated_u_v = base_voltage.nominalVoltage.to('V')
-    rated_s_va = system_mva * 1e6
-    return impedance.z_base(rated_u_v, rated_s_va), impedance.y_base(rated_u_v, rated_s_va)

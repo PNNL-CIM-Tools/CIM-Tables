@@ -147,7 +147,10 @@ def _coerce(raw: str, py_type: type) -> Any:
     this is the str->real-type coercion a generated LinkML class used to do
     for us."""
     if py_type is bool:
-        return raw.strip().lower() in ('true', '1')
+        token = raw.strip().lower()
+        if token not in ('true', 'false', '1', '0'):
+            raise ValueError(f"expected a boolean (true/false/1/0), got {raw!r}")
+        return token in ('true', '1')
     if py_type in (int, float):
         return py_type(raw)
     if isinstance(py_type, type) and issubclass(py_type, Enum):

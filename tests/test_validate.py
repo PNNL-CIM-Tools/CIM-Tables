@@ -92,6 +92,13 @@ def test_boolean_slot_is_native_bool_not_str():
     assert not row.open
 
 
+def test_boolean_slot_rejects_non_boolean_text():
+    # 'yes'/'open'/typos used to silently become False
+    for raw in ('yes', 'open', 'ture'):
+        with pytest.raises(validate.CimtblValidationError, match=r"'open'.*expected a boolean"):
+            validate.validate(_record('Fuse', {'mRID': 'fuse_1', 'open': raw}))
+
+
 def test_two_header_shapes_of_same_class_both_validate():
     by_sequence = validate.validate(
         _record('ACLineSegment', {

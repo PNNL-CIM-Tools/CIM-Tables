@@ -2,7 +2,7 @@
 
 Decision for how `bind_row` converts a `percent` / `pu` impedance column
 (`r (percent)`, `x (percent)`, ...) to ohms. Implemented in
-`cimtables/binder.py::_winding_z_base` and `graph_write.set_attr`.
+`cimtables/impedance.py::z_base` and `graph_write.set_attr`.
 
 ## Rule
 
@@ -84,25 +84,22 @@ That's why no rule built on a phase-to-phase voltage can work for every winding.
    `baseU`/`baseS`. cimtables assumes it is. Ask for explicit wording.
 
 
-## System base (implemented separately from the winding-base rule above)
+## System base
 
-The winding-base rule above (`baseU²/baseS`, implemented in
-`cimtables/impedance.py::resolve_winding_z_base`) only fits classes that
-carry - or reference, via a `From*` FK - their own rating pair
-(`TransformerWinding`, `PowerTransformerEnd`). `ACLineSegment` has no such
-pair (no `ratedS`/`ratedU` anywhere in this profile), so its `r`/`x`/`r0`/`x0`
-use a different base source instead: `CIMG_SYSTEM_MVA_BASE` (an env var, read
-once per `ObjectBuilder` via `cimtables.impedance.get_system_mva_base` - the
-PSS/E-RAW-SBASE equivalent for CIM) paired with the line's own
-`BaseVoltage.nominalVoltage`. This is `pu` on `BasePower`/`BaseVoltage` as
-originally envisioned here, just resolved through an env var rather than a
-`BasePower` graph object, since `ACLineSegment` carries no FK to one.
-Implemented in `cimbuilder/builders/line/ac_line_segment.py`'s
-`_system_z_base`; `percent` is not rejected but `pu` is the realistic
-convention for a line (percent/%Z is a nameplate-impedance convention for
-transformer tanks, not how line impedance is expressed on a system base).
+The winding-base rule above only fits classes that carry - or reference, via
+a `From*` FK - their own rating pair (`TransformerWinding`,
+`PowerTransformerEnd`). The base is chosen by class shape: a rated class
+with an unset rating raises rather than falling back to the system base
+(`PowerTransformerEnd` also has a `BaseVoltage`, so a value-based fallback
+would silently convert on the wrong base).
 
-**Still open:** `EnergySource.r`/`.x` has the identical missing-rating-pair
-problem as `ACLineSegment` (no `ratedS`/`ratedU` on the class either) and
-will need the same `CIMG_SYSTEM_MVA_BASE` + `BaseVoltage` treatment once a
-builder exists for it (`cimbuilder/builders/source.py` is currently a stub).
+A class with no rating pair (`ACLineSegment`, `EnergySource`) uses the
+system base: its own `BaseVoltage.nominalVoltage` and cim-graph's
+`network.base_power` (`GraphModel.base_power`, an `ApparentPower` defaulting
+to `CIMG_SYSTEM_MVA_BASE`, else 100 MVA - the PSS/E RAW SBASE equivalent).
+The same `z_base` converts r/x/r0/x0 (ohm = pu x z_base) and bch/gch/b0ch/g0ch
+(siemens = pu / z_base), PSS/E RAW's one SBASE for both. `pu` is the
+realistic convention for a line; `percent` is accepted but is a nameplate
+convention for transformer tanks.
+
+A `BasePower` object in the model does not set `network.base_power` yet.
