@@ -7,10 +7,11 @@ from_table/add_<part> dispatch table to maintain. Every row field is
 classified purely from the profile (validate.py), by name, into exactly one
 of these buckets:
 
-- a connectivity column (node*/bus*, per connectivity.py's naming rule) ->
-  collected and passed to connectivity.add_connectivity in column order
-- the synthetic `phases` shorthand (only where the class has no real
-  `phases` attribute) -> connectivity.add_phase_children: Terminal.phases
+- a connectivity column (synthetic.CONNECTIVITY_COLUMNS: node/node1/node2,
+  bus/bus1/bus2) -> collected and passed to connectivity.add_connectivity
+- the synthetic `phases` / `phaseSide1` + `phaseSide2` shorthand (only
+  where the class has no real attribute of that name) ->
+  connectivity.add_phase_children: Terminal.phases
   plus <Class>Phase children (§3.6)
 - EquipmentContainer -> resolved by mRID via graph_write.resolve (its range is
   always an abstract base: Feeder, Substation, ... - see validate.py's
@@ -45,7 +46,6 @@ from cimtables.units import Qty
 _SKIP_FIELDS = {'mRID', 'identifier', 'source_file', 'source_line'}
 _CONTAINER_FIELD = 'EquipmentContainer'
 _FROM_PREFIX = 'From'
-_PHASES_FIELD = 'phases'
 
 
 def _new_object(cim_cls: type, row: object) -> object:
@@ -79,7 +79,7 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
         obj = _new_object(getattr(network.cim, row_cls_name.removesuffix('Row')), row)
 
     node_cols: dict[str, str] = {}
-    phases: str | None = None
+    phase_cols: dict[str, str] = {}
     deferred_fks: list[tuple[str, str]] = []
     relative_qtys: list[tuple[str, Qty]] = []
 
@@ -90,10 +90,10 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
         if value is None:
             continue
 
-        if synthetic.is_connectivity_column(f.name):
+        if f.name in synthetic.CONNECTIVITY_COLUMNS and f.name not in obj.__dataclass_fields__:
             node_cols[f.name] = value
-        elif f.name == _PHASES_FIELD and _PHASES_FIELD not in obj.__dataclass_fields__:
-            phases = value
+        elif f.name in synthetic.PHASE_COLUMNS and f.name not in obj.__dataclass_fields__:
+            phase_cols[f.name] = value
         elif f.name == _CONTAINER_FIELD:
             container = graph_write.resolve(network, network.cim.EquipmentContainer, value)
             if container is None:
@@ -126,14 +126,14 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
     has_container_slot = _CONTAINER_FIELD in ref_slots
     terminals = []
     if node_cols:
-        terminals = connectivity.add_connectivity(network, obj, node_cols=node_cols, container=container)
+        terminals = connectivity.add_connectivity(network, obj, node_cols=node_cols, equipment_container=container)
     elif has_container_slot:
         resolved_container = container if container is not None else network.container
         if isinstance(resolved_container, network.cim.EquipmentContainer):
             graph_write.set_assc(obj, network.cim, _CONTAINER_FIELD, resolved_container)
 
-    if phases is not None:
-        connectivity.add_phase_children(network, obj, terminals, phases=phases)
+    if phase_cols:
+        connectivity.add_phase_children(network, obj, terminals, **phase_cols)
 
     if relative_qtys:
         z_base = impedance.z_base(obj, from_targets, network.base_power)

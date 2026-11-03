@@ -3,10 +3,12 @@
 the conversion itself: ohm = pu * z_base, siemens = pu / z_base (one base for
 impedance and admittance, PSS/E RAW's convention)."""
 
-from cimprofiles.units.units import CIMUnit
+from cimprofiles.units.units import CIMUnit, ureg
+
+from cimtables.units import Qty
 
 
-def z_base(obj: object, from_targets: list[object], base_power: CIMUnit | None) -> float:
+def z_base(obj: object, from_targets: list[object], base_power: CIMUnit | Qty | float | None) -> float:
     """Impedance base U²/S in ohms for obj's pu/percent values.
 
     Which U and S is decided by class shape, never by which values happen to
@@ -17,7 +19,9 @@ def z_base(obj: object, from_targets: list[object], base_power: CIMUnit | None) 
        class has them (TransformerWinding: coil voltage, common tank kVA),
        else ratedU/ratedS (PowerTransformerEnd). Both must be set.
     2. else the system base (ACLineSegment, EnergySource): obj's own
-       BaseVoltage.nominalVoltage and `base_power` (network.base_power).
+       BaseVoltage.nominalVoltage, or nomU where the class has it
+       (ShuntCompensator; it must be set), and `base_power` (network.base_power, a
+       CIMUnit, a Qty such as Qty(100, 'MVA'), or a plain number in VA).
     Raises ValueError naming what is missing."""
     
     for candidate in [obj, *from_targets]:
@@ -32,11 +36,21 @@ def z_base(obj: object, from_targets: list[object], base_power: CIMUnit | None) 
             )
         return u.to('V') ** 2 / s.to('VA')
 
-    base_voltage = getattr(obj, 'BaseVoltage', None)
-    nominal_voltage = getattr(base_voltage, 'nominalVoltage', None)
+    if hasattr(obj, 'nomU'):
+        nominal_voltage = obj.nomU
+        voltage_source = 'nomU'
+    else:
+        nominal_voltage = getattr(getattr(obj, 'BaseVoltage', None), 'nominalVoltage', None)
+        voltage_source = 'a BaseVoltage with nominalVoltage'
     if nominal_voltage is None or base_power is None:
         raise ValueError(
             f"{type(obj).__name__} {getattr(obj, 'mRID', obj)!r}: a pu/percent impedance needs "
-            f"a rated From* reference, or a BaseVoltage with nominalVoltage and a network base_power"
+            f"a rated From* reference, or {voltage_source} and a network base_power"
         )
-    return nominal_voltage.to('V') ** 2 / base_power.to('VA')
+    if isinstance(base_power, Qty):
+        base_va = ureg.Quantity(base_power.value, base_power.unit).to('VA').magnitude
+    elif isinstance(base_power, CIMUnit):
+        base_va = base_power.to('VA')
+    else:
+        base_va = float(base_power)
+    return nominal_voltage.to('V') ** 2 / base_va

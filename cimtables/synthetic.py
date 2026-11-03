@@ -7,13 +7,17 @@ equipment "template" is a real association, not a DSL column: cim18v17's
 ACLineSegment.WireConfiguration for lines, TransformerTank.TankConfiguration
 for transformers."""
 
-SYNTHETIC_COLUMNS: dict[str, type] = {
-    'node': str, 'node1': str, 'node2': str,
-    'bus': str, 'bus1': str, 'bus2': str,
-    'phases': str,
+# The fixed connectivity vocabulary: column -> (node class, Terminal
+# sequenceNumber). Exact names only - a prefix rule would capture real CIM
+# attributes (TopologicalNode.busName/busNumber, Bay.busBarConfiguration).
+# The node class name is also the Terminal field it attaches through.
+CONNECTIVITY_COLUMNS: dict[str, tuple[str, int]] = {
+    'node': ('ConnectivityNode', 1), 'node1': ('ConnectivityNode', 1), 'node2': ('ConnectivityNode', 2),
+    'bus': ('TopologicalNode', 1), 'bus1': ('TopologicalNode', 1), 'bus2': ('TopologicalNode', 2),
 }
 
+# phases (same on every terminal) or phaseSide1 + phaseSide2 (a SwitchPhase
+# switch whose sides differ) -> connectivity.add_phase_children.
+PHASE_COLUMNS = ('phases', 'phaseSide1', 'phaseSide2')
 
-def is_connectivity_column(name: str) -> bool:
-    """§3.5's naming rule: node* -> ConnectivityNode, bus* -> TopologicalNode."""
-    return name.startswith('node') or name.startswith('bus')
+SYNTHETIC_COLUMNS: dict[str, type] = {**dict.fromkeys(CONNECTIVITY_COLUMNS, str), **dict.fromkeys(PHASE_COLUMNS, str)}

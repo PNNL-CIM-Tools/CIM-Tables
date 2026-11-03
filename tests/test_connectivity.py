@@ -88,7 +88,7 @@ def test_add_connectivity_explicit_container_overrides_network_default(network):
     graph_write.add_to_graph(network, line)
 
     connectivity.add_connectivity(
-        network, line, node_cols={'node1': 'RG60', 'node2': '362'}, container=explicit_container
+        network, line, node_cols={'node1': 'RG60', 'node2': '362'}, equipment_container=explicit_container
     )
 
     assert line.EquipmentContainer is explicit_container
@@ -134,6 +134,25 @@ def test_add_connectivity_unknown_column_prefix_raises(network):
 
     with pytest.raises(ValueError, match='not a connectivity column'):
         connectivity.add_connectivity(network, line, node_cols={'terminal1': 'RG60'})
+
+
+def test_add_connectivity_sequence_number_comes_from_column_not_header_order(network):
+    line = cim.ACLineSegment(mRID='650632')
+    graph_write.add_to_graph(network, line)
+
+    terminals = connectivity.add_connectivity(network, line, node_cols={'node2': '362', 'node1': 'RG60'})
+
+    assert [(t.mRID, t.sequenceNumber, t.ConnectivityNode.mRID) for t in terminals] == [
+        ('650632_T1', 1, 'RG60'), ('650632_T2', 2, '362'),
+    ]
+
+
+def test_add_connectivity_two_columns_on_one_terminal_raises(network):
+    load = cim.EnergyConsumer(mRID='ld_1')
+    graph_write.add_to_graph(network, load)
+
+    with pytest.raises(ValueError, match='two columns on terminal 1'):
+        connectivity.add_connectivity(network, load, node_cols={'node': '671', 'node1': '672'})
 
 
 def test_add_phase_children_creates_correct_phase_kinds_and_sequence(network):
@@ -228,3 +247,39 @@ def test_transformer_end_node_puts_terminal_on_power_transformer(network):
     assert terminal.sequenceNumber == 2
     assert terminal.ConnectivityNode.mRID == '634'
     assert terminal.phases == cim.PhaseCode.ABCN
+
+
+def test_switch_sides_can_differ_and_pair_by_position(network):
+    switch = cim.Switch(mRID='sw1')
+    graph_write.add_to_graph(network, switch)
+    terminals = connectivity.add_connectivity(network, switch, node_cols={'node1': '671', 'node2': 'sw'})
+
+    children = connectivity.add_phase_children(network, switch, terminals, phaseSide1='AB', phaseSide2='AC')
+
+    assert [(c.mRID, c.phaseSide1.value, c.phaseSide2.value) for c in children] == [
+        ('sw1_A', 'A', 'A'), ('sw1_B', 'B', 'C'),
+    ]
+    assert [t.phases for t in terminals] == [cim.PhaseCode.AB, cim.PhaseCode.AC]
+
+
+@pytest.mark.parametrize('sides, match', [
+    ({'phaseSide1': 'AB'}, 'must be given together'),
+    ({'phaseSide1': 'AB', 'phaseSide2': 'A'}, 'same number of phases'),
+    ({'phases': 'AB', 'phaseSide1': 'AB', 'phaseSide2': 'AC'}, 'not both'),
+])
+def test_switch_side_phases_misuse_raises(network, sides, match):
+    switch = cim.Switch(mRID='sw1')
+    graph_write.add_to_graph(network, switch)
+    terminals = connectivity.add_connectivity(network, switch, node_cols={'node1': '671', 'node2': 'sw'})
+
+    with pytest.raises(ValueError, match=match):
+        connectivity.add_phase_children(network, switch, terminals, **sides)
+
+
+def test_differing_sides_on_single_phase_child_class_raises(network):
+    line = cim.ACLineSegment(mRID='ln1')
+    graph_write.add_to_graph(network, line)
+    terminals = connectivity.add_connectivity(network, line, node_cols={'node1': '671', 'node2': '672'})
+
+    with pytest.raises(ValueError, match="can't differ"):
+        connectivity.add_phase_children(network, line, terminals, phaseSide1='AB', phaseSide2='AC')

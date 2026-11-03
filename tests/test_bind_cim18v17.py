@@ -45,12 +45,42 @@ def test_delta_load_children_are_line_to_line_branches(network, cim):
         '    ld_645, 645, B,   Y\n'
     ))
     branches = {
-        mRID: [c.phases.value if c.phases else c.phase.value
+        mRID: [(c.phase.value, c.phases.value if c.phases else None)
                for c in graph_write.resolve(network, cim.EnergyConsumer, mRID).EnergyConsumerPhase]
         for mRID in ('ld_646', 'ld_692', 'ld_671', 'ld_645')
     }
-    assert branches == {'ld_646': ['BC'], 'ld_692': ['AC'], 'ld_671': ['AB', 'BC', 'AC'], 'ld_645': ['B']}
+    # normative phase = from-phase of the branch (to the next logical phase); phases = extension
+    assert branches == {
+        'ld_646': [('B', 'BC')],
+        'ld_692': [('C', 'AC')],
+        'ld_671': [('A', 'AB'), ('B', 'BC'), ('C', 'AC')],
+        'ld_645': [('B', None)],
+    }
     assert graph_write.resolve(network, cim.EnergyConsumer, 'ld_692').Terminals[0].phases == cim.PhaseCode.AC
+
+
+def test_delta_ignores_neutral_and_needs_two_line_phases(network, cim):
+    _bind_text(network, 'Object EnergyConsumer: mRID=ld_d, node=671, phases=ABCN, phaseConnection=D\n')
+    load = graph_write.resolve(network, cim.EnergyConsumer, 'ld_d')
+    assert [c.phase.value for c in load.EnergyConsumerPhase] == ['A', 'B', 'C']
+    with pytest.raises(ValueError, match='two non-neutral phases'):
+        _bind_text(network, 'Object EnergyConsumer: mRID=ld_d1, node=671, phases=BN, phaseConnection=D\n')
+
+
+def test_bus_prefixed_cim_attributes_are_not_connectivity_columns(network, cim):
+    _bind_text(network, 'Object TopologicalNode: mRID=topo_bus_1, busName=BUS 1, busNumber=1\n')
+    bus = graph_write.resolve(network, cim.TopologicalNode, 'topo_bus_1')
+    assert (bus.busName, bus.busNumber, bus.Terminal) == ('BUS 1', 1, [])
+
+
+def test_switch_row_with_different_phases_per_side(network, cim):
+    _bind_text(network, (
+        'Table Breaker: mRID, node1, node2, phaseSide1, phaseSide2\n'
+        '    brkr_1, 671, 692, AB, AC\n'
+    ))
+    breaker = graph_write.resolve(network, cim.Breaker, 'brkr_1')
+    assert [(c.phaseSide1.value, c.phaseSide2.value) for c in breaker.SwitchPhase] == [('A', 'A'), ('B', 'C')]
+    assert [t.phases.value for t in breaker.Terminals] == ['AB', 'AC']
 
 
 def test_transformer_end_node_and_phases_go_on_power_transformer_terminal(network, cim):

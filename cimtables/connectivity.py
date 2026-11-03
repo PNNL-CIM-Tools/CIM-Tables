@@ -1,6 +1,6 @@
 """Phase 4: the connectivity backend - node/bus/terminal/phase (design: CIMTBL_DESIGN.md §5, §12.4).
 
-The one place that knows §3.5's node*/bus* vocabulary and §3.6's phase-child
+The one place that acts on §3.5's node/bus columns (synthetic.CONNECTIVITY_COLUMNS) and §3.6's phase-child
 synthesis. Every Builder's add_connectivity (Phase 5) is a thin wrapper around
 these two functions - no per-class node-vs-bus or phase logic anywhere else.
 """
@@ -11,21 +11,7 @@ import typing
 import cimprofiles.cim18.cim18v17.connectivity_unbalanced as CN
 from cimgraph.models import GraphModel
 
-from cimtables import graph_write
-
-
-def _node_cls(network: GraphModel, col_name: str) -> type:
-    """§3.5's one non-reflective naming rule: node* -> ConnectivityNode,
-    bus* -> TopologicalNode. Fails fast on anything else - no silent
-    fallback for a column that isn't part of the fixed vocabulary."""
-    if col_name.startswith('node'):
-        return network.cim.ConnectivityNode
-    if col_name.startswith('bus'):
-        return network.cim.TopologicalNode
-    raise ValueError(
-        f"{col_name!r} is not a connectivity column (must start with "
-        f"'node' or 'bus', per CIMTBL_DESIGN.md §3.5)"
-    )
+from cimtables import graph_write, synthetic
 
 
 def _parent_assoc_field(phase_cls: type, parent: object) -> str:
@@ -46,19 +32,19 @@ def _parent_assoc_field(phase_cls: type, parent: object) -> str:
     )
 
 
-def _resolve_node(network: GraphModel, col_name: str, node_mrid: str) -> object:
-    """The ConnectivityNode/TopologicalNode with this mRID, auto-vivified if new."""
-    node_cls = _node_cls(network, col_name)
+def _resolve_node(network: GraphModel, col_name: str, node_mrid: str) -> CN.ConnectivityNode | CN.TopologicalNode:
+    """The ConnectivityNode/TopologicalNode for a connectivity column, auto-vivified if new."""
+    if col_name not in synthetic.CONNECTIVITY_COLUMNS:
+        raise ValueError(
+            f"{col_name!r} is not a connectivity column (one of {list(synthetic.CONNECTIVITY_COLUMNS)}, "
+            f"per CIMTBL_DESIGN.md §3.5)"
+        )
+    node_cls = getattr(network.cim, synthetic.CONNECTIVITY_COLUMNS[col_name][0])
     node_obj = graph_write.resolve(network, node_cls, node_mrid)
     if node_obj is None:
         node_obj = node_cls(mRID=node_mrid)
         graph_write.add_to_graph(network, node_obj)
     return node_obj
-
-
-def _terminal_node_field(network: GraphModel, node_obj: object) -> str:
-    """The Terminal field a node/bus object attaches through."""
-    return 'ConnectivityNode' if isinstance(node_obj, network.cim.ConnectivityNode) else 'TopologicalNode'
 
 
 def _add_end_terminal(network: GraphModel, end: CN.TransformerEnd, node_cols: dict[str, str]) -> CN.Terminal:
@@ -73,56 +59,58 @@ def _add_end_terminal(network: GraphModel, end: CN.TransformerEnd, node_cols: di
         raise ValueError(f"{end.mRID!r}: a node/bus column on a TransformerEnd needs its PowerTransformer and endNumber")
 
     [(col_name, node_mrid)] = node_cols.items()
-    node_obj:CN.ConnectivityNode = _resolve_node(network, col_name, node_mrid)
+    node_obj = _resolve_node(network, col_name, node_mrid)
     if transformer.EquipmentContainer is not None and node_obj.ConnectivityNodeContainer is None:
         graph_write.set_assc(node_obj, cim, 'ConnectivityNodeContainer', transformer.EquipmentContainer)
 
     terminal = cim.Terminal(mRID=f'{transformer.mRID}_T{end.endNumber}', sequenceNumber=end.endNumber)
     graph_write.set_assc(terminal, cim, 'ConductingEquipment', transformer)
-    graph_write.set_assc(terminal, cim, _terminal_node_field(network, node_obj), node_obj)
+    graph_write.set_assc(terminal, cim, synthetic.CONNECTIVITY_COLUMNS[col_name][0], node_obj)
     graph_write.set_assc(end, cim, 'Terminal', terminal)
     graph_write.add_to_graph(network, terminal)
     return terminal
 
 
-def add_connectivity(network: GraphModel, obj: CN.ConductingEquipment, *, node_cols: dict[str, str],
-                      container: object = None) -> list[CN.Terminal]:
-    """node_cols is the already-disambiguated {'node1': 'busA', 'bus2': 'busB', ...}
-    slice of a <Class>Row (node/bus mRIDs) - the caller picks which of the row's
-    fields are connectivity columns. Auto-vivifies any mRID not found via resolve().
-    Returns Terminals in column order (sequenceNumber = list index + 1).
+def add_connectivity(network: GraphModel, equipment: CN.ConductingEquipment|CN.TransformerEnd, *, node_cols: dict[str, str],
+                      equipment_container: CN.EquipmentContainer | None = None) -> list[CN.Terminal]:
+    """node_cols is the {'node1': 'RG60', 'node2': '362'} slice of a <Class>Row
+    (node/bus mRIDs). Each column fixes its node class and Terminal
+    sequenceNumber (synthetic.CONNECTIVITY_COLUMNS), so header order doesn't
+    matter; an unknown column or two columns on one sequenceNumber raise.
+    Auto-vivifies any mRID not found via resolve(). Returns Terminals in
+    sequenceNumber order.
 
-    Sets obj.EquipmentContainer from `container`, falling back to
-    network.container when not given - the one unambiguous container
-    available today (.cimtbl has no per-row/per-table container syntax yet).
-    Propagates the same container onto every node touched
-    (ConnectivityNodeContainer), without overwriting one already set."""
-    cim = network.cim
-    if isinstance(obj, cim.TransformerEnd):
-        return [_add_end_terminal(network, obj, node_cols)]
+    Sets equipment.EquipmentContainer from `equipment_container`, falling back
+    to network.container when not given. Propagates the same container onto
+    every node touched (ConnectivityNodeContainer), without overwriting one
+    already set."""
+    cim:CN = network.cim # type:ignore
+    if isinstance(equipment, cim.TransformerEnd):
+        return [_add_end_terminal(network, equipment, node_cols)]
 
-    resolved_container = container if container is not None else network.container
+    resolved_container = equipment_container if equipment_container is not None else network.container
     has_container = isinstance(resolved_container, cim.EquipmentContainer)
 
-    terminals = []
-    for i, (col_name, node_mrid) in enumerate(node_cols.items(), start=1):
-        node_obj:CN.ConnectivityNode = _resolve_node(network, col_name, node_mrid)
+    terminals_by_sequence: dict[int, CN.Terminal] = {}
+    for col_name, node_mrid in node_cols.items():
+        node_obj = _resolve_node(network, col_name, node_mrid)
+        node_field, sequence_number = synthetic.CONNECTIVITY_COLUMNS[col_name]
+        if sequence_number in terminals_by_sequence:
+            raise ValueError(f"{equipment.mRID!r}: {list(node_cols)} put two columns on terminal {sequence_number}")
 
         if has_container and node_obj.ConnectivityNodeContainer is None:
             graph_write.set_assc(node_obj, cim, 'ConnectivityNodeContainer', resolved_container)
 
-        terminal = cim.Terminal(mRID=f'{obj.mRID}_T{i}', sequenceNumber=i)
-        graph_write.set_assc(terminal, cim, 'ConductingEquipment', obj)
-
-        graph_write.set_assc(terminal, cim, _terminal_node_field(network, node_obj), node_obj)
-
+        terminal = cim.Terminal(mRID=f'{equipment.mRID}_T{sequence_number}', sequenceNumber=sequence_number)
+        graph_write.set_assc(terminal, cim, 'ConductingEquipment', equipment)
+        graph_write.set_assc(terminal, cim, node_field, node_obj)
         graph_write.add_to_graph(network, terminal)
-        terminals.append(terminal)
+        terminals_by_sequence[sequence_number] = terminal
 
     if has_container:
-        graph_write.set_assc(obj, cim, 'EquipmentContainer', resolved_container)
+        graph_write.set_assc(equipment, cim, 'EquipmentContainer', resolved_container)
 
-    return terminals
+    return [terminals_by_sequence[n] for n in sorted(terminals_by_sequence)]
 
 
 _PHASE_TOKEN = re.compile(r's1|s2|[ABCN]')
@@ -156,30 +144,50 @@ def _phase_cls(network: GraphModel, obj: object) -> type:
     raise ValueError(f"{type(obj).__name__} has no <Class>Phase child class for a phases column")
 
 
-def _delta_pairs(tokens: list[str]) -> list[list[str]]:
-    """Line-to-line branches of a delta shunt: ['B', 'C'] -> [BC];
-    ['A', 'B', 'C'] -> [AB, BC, CA]."""
-    if len(tokens) == 2:
-        return [tokens]
-    return [[tokens[i], tokens[(i + 1) % len(tokens)]] for i in range(len(tokens))]
+# Normative delta rule (SinglePhaseKind): the child connects its phase "to the next
+# logical non-neutral phase".
+_NEXT_PHASE = {'A': 'B', 'B': 'C', 'C': 'A', 's1': 's2'}
 
 
-def add_phase_children(network: GraphModel, obj: CN.ConductingEquipment, terminals: list[CN.Terminal],
-                        *, phases: str) -> list[CN.PowerSystemResource]:
+def add_phase_children(network: GraphModel, obj: CN.ConductingEquipment, terminals: list[CN.Terminal], *,
+                       phases: str | None = None, phaseSide1: str | None = None,
+                       phaseSide2: str | None = None) -> list[CN.PowerSystemResource]:
     """phases='ABCN' -> per-phase children (e.g. ACLineSegmentPhase) per §3.6,
     wired to obj. Every terminal gets the canonical PhaseCode of the set.
 
-    One child per token in written order, given SinglePhaseKind +
-    sequenceNumber - except a delta shunt (phaseConnection=D) whose child
-    class carries the `phases` PhaseCode extension (EnergyConsumerPhase,
-    ShuntCompensatorPhase, ...): there each child is one line-to-line branch,
-    so a single-phase delta load on BC is one child with phases=BC."""
+    phaseSide1='AB', phaseSide2='AC' instead of phases: a switch whose sides
+    differ (only a child class with phaseSide1/phaseSide2, i.e. SwitchPhase).
+    The sides pair by written position (A-A, B-C); terminal 1 gets side 1's
+    PhaseCode, terminal 2 side 2's.
+
+    Every child gets the normative SinglePhaseKind (`phase`, or SwitchPhase's
+    phaseSide1/phaseSide2) and a sequenceNumber where the class has one:
+    - default (wye, lines, switches): one child per token in written order.
+    - delta shunt (phaseConnection=D): one child per line-to-line branch, whose
+      `phase` is the branch's from-phase (normative CIM: "connected from the
+      indicated phase to the next logical non-neutral phase"), plus the branch
+      PhaseCode in the `phases` extension where the class has it: a delta load
+      on BC is one child phase=B, phases=BC; on CA it's phase=C, phases=AC."""
     cim = network.cim
     if not terminals:
         raise ValueError(f"{obj.mRID!r}: a phases column needs a node/bus column to put the phases on")
-    tokens = parse_phases(phases)
-    for terminal in terminals:
-        graph_write.set_attr(terminal, cim, 'phases', cim.PhaseCode(phase_code(tokens)))
+    if phases is not None and (phaseSide1 is not None or phaseSide2 is not None):
+        raise ValueError(f"{obj.mRID!r}: give either phases or phaseSide1/phaseSide2, not both")
+    if phases is not None:
+        tokens = side2_tokens = parse_phases(phases)
+        for terminal in terminals:
+            graph_write.set_attr(terminal, cim, 'phases', cim.PhaseCode(phase_code(tokens)))
+    else:
+        if phaseSide1 is None or phaseSide2 is None:
+            raise ValueError(f"{obj.mRID!r}: phaseSide1 and phaseSide2 must be given together")
+        tokens, side2_tokens = parse_phases(phaseSide1), parse_phases(phaseSide2)
+        if len(tokens) != len(side2_tokens) or len(terminals) != 2:
+            raise ValueError(
+                f"{obj.mRID!r}: phaseSide1 {phaseSide1!r} / phaseSide2 {phaseSide2!r} need the same "
+                f"number of phases and two terminals (got {len(terminals)})"
+            )
+        graph_write.set_attr(terminals[0], cim, 'phases', cim.PhaseCode(phase_code(tokens)))
+        graph_write.set_attr(terminals[1], cim, 'phases', cim.PhaseCode(phase_code(side2_tokens)))
     if isinstance(obj, cim.TransformerEnd):
         return []  # an end's phases live on its terminal only
 
@@ -187,17 +195,28 @@ def add_phase_children(network: GraphModel, obj: CN.ConductingEquipment, termina
     parent_field = _parent_assoc_field(phase_cls, obj)
     child_hints = typing.get_type_hints(phase_cls)
     has_sequence_number = 'sequenceNumber' in child_hints
-    is_delta = getattr(obj, 'phaseConnection', None) == cim.PhaseShuntConnectionKind.D
-    if is_delta and 'phases' in child_hints:
-        branches = [phase_code(pair) for pair in _delta_pairs(tokens)]
-        new_children = [phase_cls(mRID=f'{obj.mRID}_{code}', phases=cim.PhaseCode(code)) for code in branches]
-    else:
-        # SwitchPhase has phaseSide1/phaseSide2 instead of phase: same phase both sides
-        phase_attrs = ['phase'] if 'phase' in child_hints else ['phaseSide1', 'phaseSide2']
+    has_sides = 'phaseSide1' in child_hints
+    if tokens != side2_tokens and not has_sides:
+        raise ValueError(f"{obj.mRID!r}: {phase_cls.__name__} has one phase per child, so phaseSide1/phaseSide2 can't differ")
+
+    if getattr(obj, 'phaseConnection', None) == cim.PhaseShuntConnectionKind.D:
+        from_phases = [t for t in tokens if _NEXT_PHASE.get(t) in tokens]
+        if not from_phases:
+            raise ValueError(f"{obj.mRID!r}: a delta connection needs two non-neutral phases, got {phases!r}")
+        new_children = []
+        for t in from_phases:
+            branch_code = phase_code([t, _NEXT_PHASE[t]])
+            child = phase_cls(mRID=f'{obj.mRID}_{branch_code}', phase=cim.SinglePhaseKind(t))
+            if 'phases' in child_hints:
+                child.phases = cim.PhaseCode(branch_code)
+            new_children.append(child)
+    elif has_sides:  # SwitchPhase: phaseSide1/phaseSide2 instead of phase
         new_children = [
-            phase_cls(mRID=f'{obj.mRID}_{t}', **{attr: cim.SinglePhaseKind(t) for attr in phase_attrs})
-            for t in tokens
+            phase_cls(mRID=f'{obj.mRID}_{t1}', phaseSide1=cim.SinglePhaseKind(t1), phaseSide2=cim.SinglePhaseKind(t2))
+            for t1, t2 in zip(tokens, side2_tokens)
         ]
+    else:
+        new_children = [phase_cls(mRID=f'{obj.mRID}_{t}', phase=cim.SinglePhaseKind(t)) for t in tokens]
 
     children = []
     for i, child in enumerate(new_children, start=1):

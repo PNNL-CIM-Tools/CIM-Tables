@@ -26,15 +26,15 @@ with no genuine part-scoped reference available yet (Phase 3/4 code).
 import dataclasses
 import typing
 from types import ModuleType
+from typing import Type, TypeVar
 
-from cimprofiles.units.units import CIMUnit
 from cimgraph.models import GraphModel
+from cimprofiles.units.units import CIMUnit
 
 from cimtables.units import Qty
 
-from typing import TypeVar, Type
+T = TypeVar("T")
 
-T = TypeVar('T')
 
 def _part_field(part: ModuleType, obj: object, attr: str) -> dataclasses.Field:
     """The dataclasses.Field for `attr` on part's class of the same name as
@@ -57,8 +57,14 @@ def _part_field(part: ModuleType, obj: object, attr: str) -> dataclasses.Field:
         ) from None
 
 
-def set_attr(obj: object, part: ModuleType, attr: str, value: object, *,
-             z_base: float | None = None) -> None:
+def set_attr(
+    source_object: object,
+    profile_part: ModuleType,
+    attribute_name: str,
+    attribute_value: object,
+    *,
+    z_base: float | None = None,
+) -> None:
     """Set a plain scalar, CIMUnit or Qty onto a live cim-graph object's attribute.
 
     The value must match the attribute's declared type, as cim-graph's own
@@ -83,58 +89,67 @@ def set_attr(obj: object, part: ModuleType, attr: str, value: object, *,
     Raises ValueError if `attr` is not a real field of part's same-named
     class, or if it IS a field but an association (has metadata['inverse'])
     - use set_assc for that."""
-    field = _part_field(part, obj, attr)
-    if field.metadata.get('inverse') is not None:
+    field = _part_field(profile_part, source_object, attribute_name)
+    if field.metadata.get("inverse") is not None:
         raise ValueError(
-            f"{attr!r} is an association on {part.__name__}.{type(obj).__name__} "
+            f"{attribute_name!r} is an association on {profile_part.__name__}.{type(source_object).__name__} "
             f"(inverse={field.metadata['inverse']!r}) - use set_assc, not set_attr"
         )
 
-    if value is None:
-        setattr(obj, attr, None)
+    if attribute_value is None:
         return
 
-    hint = typing.get_type_hints(type(obj))[attr]
-    declared = [t for t in typing.get_args(hint) or (hint,) if isinstance(t, type) and t is not type(None)]
+    hint = typing.get_type_hints(type(source_object))[attribute_name]
+    declared = [
+        t
+        for t in typing.get_args(hint) or (hint,)
+        if isinstance(t, type) and t is not type(None)
+    ]
     cim_unit_type = next((t for t in declared if issubclass(t, CIMUnit)), None)
-    where = f"{type(obj).__name__}.{attr}"
+    where = f"{type(source_object).__name__}.{attribute_name}"
 
-    if isinstance(value, Qty):
+    if isinstance(attribute_value, Qty):
         if cim_unit_type is None:
-            raise ValueError(f"{where} is not a CIMUnit-typed attribute, but got a Qty ({value!r})")
+            raise ValueError(
+                f"{where} is not a CIMUnit-typed attribute, but got a Qty ({attribute_value!r})"
+            )
         unit_name = cim_unit_type(0).unit.name
-        if value.is_relative() and unit_name in ('ohm', 'S'):
+        if attribute_value.is_relative() and unit_name in ("ohm", "S"):
             if z_base is None:
                 raise ValueError(
-                    f"{where}: {value.unit!r} value needs a z_base, "
-                    f"but none was given for {getattr(obj, 'mRID', obj)!r}"
+                    f"{where}: {attribute_value.unit!r} value needs a z_base, "
+                    f"but none was given for {getattr(source_object, 'mRID', source_object)!r}"
                 )
-            per_unit = value.value / 100 if value.unit == 'percent' else value.value
-            si_value = per_unit * z_base if unit_name == 'ohm' else per_unit / z_base
-            value = cim_unit_type(si_value)
-        elif value.unit:
-            value = cim_unit_type(value.value, value.unit)
+            per_unit = attribute_value.value / 100 if attribute_value.unit == "percent" else attribute_value.value
+            si_value = per_unit * z_base if unit_name == "ohm" else per_unit / z_base
+            attribute_value = cim_unit_type(si_value)
+        elif attribute_value.unit:
+            attribute_value = cim_unit_type(attribute_value.value, attribute_value.unit)
         else:
-            value = cim_unit_type(value.value)
-    elif isinstance(value, CIMUnit) and cim_unit_type is not None:
-        value = cim_unit_type(value)
-    elif isinstance(value, bool) or bool in declared:
-        if not (isinstance(value, bool) and bool in declared):
-            raise TypeError(f"{where} expects {[t.__name__ for t in declared]}, got {value!r}")
-    elif isinstance(value, (int, float)) and cim_unit_type is not None:
-        value = cim_unit_type(value)
-    elif isinstance(value, (int, float)) and float in declared:
-        value = float(value)
-    elif not isinstance(value, tuple(declared)):
-        raise TypeError(f"{where} expects {[t.__name__ for t in declared]}, got {value!r}")
+            attribute_value = cim_unit_type(attribute_value.value)
+    elif isinstance(attribute_value, CIMUnit) and cim_unit_type is not None:
+        attribute_value = cim_unit_type(attribute_value)
+    elif isinstance(attribute_value, bool) or bool in declared:
+        if not (isinstance(attribute_value, bool) and bool in declared):
+            raise TypeError(
+                f"{where} expects {[t.__name__ for t in declared]}, got {attribute_value!r}"
+            )
+    elif isinstance(attribute_value, (int, float)) and cim_unit_type is not None:
+        attribute_value = cim_unit_type(attribute_value)
+    elif isinstance(attribute_value, (int, float)) and float in declared:
+        attribute_value = float(attribute_value)
+    elif not isinstance(attribute_value, tuple(declared)):
+        raise TypeError(
+            f"{where} expects {[t.__name__ for t in declared]}, got {attribute_value!r}"
+        )
 
-    setattr(obj, attr, value)
+    setattr(source_object, attribute_name, attribute_value)
 
 
 def _set_side(obj: object, attr: str, field: dataclasses.Field, target: object) -> None:
     """One side of an association write - list-append (dedup by identity,
     matching cimgraph's own create_edge) or singular overwrite, per field.type."""
-    if 'list' in field.type:
+    if "list" in field.type:
         obj_list = getattr(obj, attr)
         if not any(x is target for x in obj_list):
             obj_list.append(target)
@@ -152,14 +167,14 @@ def set_assc(obj: object, part: ModuleType, assc: str, target: object) -> object
     class, or if it IS a field but a plain scalar (metadata['inverse'] is
     None) - use set_attr for that."""
     field = _part_field(part, obj, assc)
-    inverse = field.metadata.get('inverse')
+    inverse = field.metadata.get("inverse")
     if inverse is None:
         raise ValueError(
             f"{assc!r} is a plain attribute on {part.__name__}.{type(obj).__name__} "
             f"(not an association) - use set_attr, not set_assc"
         )
 
-    reverse_cls_name, reverse_attr = inverse.split('.')
+    reverse_cls_name, reverse_attr = inverse.split(".")
     reverse_field = getattr(part, reverse_cls_name).__dataclass_fields__[reverse_attr]
 
     _set_side(obj, assc, field, target)
@@ -182,12 +197,20 @@ def resolve(network: GraphModel, cim_cls: type, mRID: str) -> object | None:
     Raises ValueError if the mRID belongs to an object of another class."""
     obj = network.find_by_mRID(mRID)
     if obj is not None and not isinstance(obj, cim_cls):
-        raise ValueError(f"mRID {mRID!r} is a {type(obj).__name__}, not a {cim_cls.__name__}")
+        raise ValueError(
+            f"mRID {mRID!r} is a {type(obj).__name__}, not a {cim_cls.__name__}"
+        )
     return obj
 
 
-def set_assc_from_mrid(network: GraphModel, obj: object, part: ModuleType, assc: str,
-                        cim_cls: Type[T], mRID: str|None) -> T:
+def set_assc_from_mrid(
+    network: GraphModel,
+    source_object: object,
+    profile_part: ModuleType,
+    association_name: str,
+    target_class: Type[T],
+    target_mRID: str | None,
+) -> T:
     """resolve() + set_assc() in one call, for the common required-FK shape
     every add_<part> method otherwise hand-writes: resolve the target by
     mRID, raise a consistent ValueError if it's missing, else wire it up.
@@ -196,11 +219,11 @@ def set_assc_from_mrid(network: GraphModel, obj: object, part: ModuleType, assc:
     Leave a multi-target check (e.g. two ends resolved together with one
     combined error message) as free-standing resolve()/set_assc() calls -
     this helper is for the single-target case only."""
-    
-    target = resolve(network, cim_cls, mRID)
+
+    target = resolve(network, target_class, target_mRID)
     if target is None:
         raise ValueError(
-            f"{getattr(obj, 'mRID', obj)!r}: {assc} {mRID!r} not found in graph "
+            f"{getattr(source_object, 'mRID', source_object)!r}: {association_name} {target_mRID!r} not found in graph "
             f"(build it before the object that references it)"
         )
-    return set_assc(obj, part, assc, target)
+    return set_assc(source_object, profile_part, association_name, target)
