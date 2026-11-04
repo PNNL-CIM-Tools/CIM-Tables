@@ -7,8 +7,9 @@ from_table/add_<part> dispatch table to maintain. Every row field is
 classified purely from the profile (validate.py), by name, into exactly one
 of these buckets:
 
-- a connectivity column (synthetic.CONNECTIVITY_COLUMNS: node/node1/node2,
-  bus/bus1/bus2) -> collected and passed to connectivity.add_connectivity
+- a connectivity column (synthetic.CONNECTIVITY_COLUMNS: node/node1/node2
+  -> node_cols, bus/bus1/bus2 -> bus_cols; both may be given) -> passed to
+  connectivity.add_connectivity
 - the synthetic `phases` / `phaseSide1` + `phaseSide2` shorthand (only
   where the class has no real attribute of that name) ->
   connectivity.add_phase_children: Terminal.phases
@@ -79,6 +80,7 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
         obj = _new_object(getattr(network.cim, row_cls_name.removesuffix('Row')), row)
 
     node_cols: dict[str, str] = {}
+    bus_cols: dict[str, str] = {}
     phase_cols: dict[str, str] = {}
     deferred_fks: list[tuple[str, str]] = []
     relative_qtys: list[tuple[str, Qty]] = []
@@ -91,7 +93,10 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
             continue
 
         if f.name in synthetic.CONNECTIVITY_COLUMNS and f.name not in obj.__dataclass_fields__:
-            node_cols[f.name] = value
+            if synthetic.CONNECTIVITY_COLUMNS[f.name][0] == 'TopologicalNode':
+                bus_cols[f.name] = value
+            else:
+                node_cols[f.name] = value
         elif f.name in synthetic.PHASE_COLUMNS and f.name not in obj.__dataclass_fields__:
             phase_cols[f.name] = value
         elif f.name == _CONTAINER_FIELD:
@@ -125,8 +130,10 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
 
     has_container_slot = _CONTAINER_FIELD in ref_slots
     terminals = []
-    if node_cols:
-        terminals = connectivity.add_connectivity(network, obj, node_cols=node_cols, equipment_container=container)
+    if node_cols or bus_cols:
+        terminals = connectivity.add_connectivity(
+            network, obj, node_cols=node_cols, bus_cols=bus_cols, equipment_container=container
+        )
     elif has_container_slot:
         resolved_container = container if container is not None else network.container
         if isinstance(resolved_container, network.cim.EquipmentContainer):

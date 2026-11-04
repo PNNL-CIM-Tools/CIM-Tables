@@ -122,6 +122,18 @@ def test_fk_to_abstract_base_resolves_concrete_subclass(network):
     assert line.PerLengthImpedance is graph_write.resolve(network, cim.PerLengthPhaseImpedance, 'mtx601')
 
 
+def test_node_and_bus_columns_bind_onto_the_same_terminals(network):
+    _bind_text(network, (
+        'Table ACLineSegment: mRID, node1, bus1, node2, bus2\n'
+        'LINE_1_2_1, SUB_1_1_3, TOPO_BUS_1, SUB_2_2_3, TOPO_BUS_2\n'
+    ))
+    line = graph_write.resolve(network, cim.ACLineSegment, 'LINE_1_2_1')
+    terminals = sorted(line.Terminals, key=lambda t: t.sequenceNumber)
+    assert [(t.ConnectivityNode.mRID, t.TopologicalNode.mRID) for t in terminals] == [
+        ('SUB_1_1_3', 'TOPO_BUS_1'), ('SUB_2_2_3', 'TOPO_BUS_2'),
+    ]
+
+
 def test_unresolved_fk_raises(network):
     with pytest.raises(ValueError, match=r"PerLengthImpedance 'missing'.*not found"):
         _bind_text(network, 'Object ACLineSegment: mRID=line_1, PerLengthImpedance=missing\n')

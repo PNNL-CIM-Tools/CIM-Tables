@@ -101,7 +101,7 @@ def test_add_connectivity_bus_prefix_disambiguates_topological_node(network):
     graph_write.add_to_graph(network, line)
 
     terminals = connectivity.add_connectivity(
-        network, line, node_cols={'bus1': 'topo_bus_1', 'bus2': 'topo_bus_2'}
+        network, line, bus_cols={'bus1': 'topo_bus_1', 'bus2': 'topo_bus_2'}
     )
 
     with pytest.raises(ValueError, match="'topo_bus_1' is a TopologicalNode, not a ConnectivityNode"):
@@ -132,8 +132,46 @@ def test_add_connectivity_unknown_column_prefix_raises(network):
     line = cim.ACLineSegment(mRID='650632')
     graph_write.add_to_graph(network, line)
 
-    with pytest.raises(ValueError, match='not a connectivity column'):
+    with pytest.raises(ValueError, match='not a ConnectivityNode connectivity column'):
         connectivity.add_connectivity(network, line, node_cols={'terminal1': 'RG60'})
+
+
+@pytest.mark.parametrize('kwargs, kind', [
+    ({'node_cols': {'bus1': 'b1'}}, 'ConnectivityNode'),
+    ({'bus_cols': {'node1': 'n1'}}, 'TopologicalNode'),
+])
+def test_add_connectivity_column_of_wrong_kind_raises(network, kwargs, kind):
+    line = cim.ACLineSegment(mRID='line_1_2')
+    graph_write.add_to_graph(network, line)
+
+    with pytest.raises(ValueError, match=f'not a {kind} connectivity column'):
+        connectivity.add_connectivity(network, line, **kwargs)
+
+
+def test_add_connectivity_node_and_bus_on_the_same_terminal(network):
+    # PSS/E RAW node-breaker: branch 'LINE_1_2_1' is bus 1 -> bus 2 and lands
+    # on substation node 3 at each end
+    line = cim.ACLineSegment(mRID='LINE_1_2_1')
+    graph_write.add_to_graph(network, line)
+
+    terminals = connectivity.add_connectivity(
+        network, line,
+        node_cols={'node1': 'SUB_1_1_3', 'node2': 'SUB_2_2_3'},
+        bus_cols={'bus1': 'TOPO_BUS_1', 'bus2': 'TOPO_BUS_2'},
+    )
+
+    assert [(t.mRID, t.sequenceNumber, t.ConnectivityNode.mRID, t.TopologicalNode.mRID) for t in terminals] == [
+        ('LINE_1_2_1_T1', 1, 'SUB_1_1_3', 'TOPO_BUS_1'), ('LINE_1_2_1_T2', 2, 'SUB_2_2_3', 'TOPO_BUS_2'),
+    ]
+    assert len(line.Terminals) == 2
+    bus_1 = graph_write.resolve(network, cim.TopologicalNode, 'TOPO_BUS_1')
+    assert bus_1.ConnectivityNodeContainer is network.container
+
+
+def test_add_connectivity_needs_a_node_or_bus(network):
+    load = cim.EnergyConsumer(mRID='ld_1')
+    with pytest.raises(ValueError, match='at least one node or bus column'):
+        connectivity.add_connectivity(network, load)
 
 
 def test_add_connectivity_sequence_number_comes_from_column_not_header_order(network):
@@ -151,7 +189,7 @@ def test_add_connectivity_two_columns_on_one_terminal_raises(network):
     load = cim.EnergyConsumer(mRID='ld_1')
     graph_write.add_to_graph(network, load)
 
-    with pytest.raises(ValueError, match='two columns on terminal 1'):
+    with pytest.raises(ValueError, match='two ConnectivityNode columns on terminal 1'):
         connectivity.add_connectivity(network, load, node_cols={'node': '671', 'node1': '672'})
 
 
@@ -247,6 +285,26 @@ def test_transformer_end_node_puts_terminal_on_power_transformer(network):
     assert terminal.sequenceNumber == 2
     assert terminal.ConnectivityNode.mRID == '634'
     assert terminal.phases == cim.PhaseCode.ABCN
+
+
+def test_transformer_end_node_and_bus_share_one_terminal(network):
+    xfmr = cim.PowerTransformer(mRID='xfm1')
+    end = cim.PowerTransformerEnd(mRID='xfm1_1', endNumber=1)
+    graph_write.set_assc(end, cim, 'PowerTransformer', xfmr)
+
+    [terminal] = connectivity.add_connectivity(network, end, node_cols={'node': 'n1'}, bus_cols={'bus': 'b1'})
+
+    assert end.Terminal is terminal
+    assert (terminal.ConnectivityNode.mRID, terminal.TopologicalNode.mRID) == ('n1', 'b1')
+
+
+def test_transformer_end_with_two_terminals_worth_raises(network):
+    xfmr = cim.PowerTransformer(mRID='xfm1')
+    end = cim.PowerTransformerEnd(mRID='xfm1_1', endNumber=1)
+    graph_write.set_assc(end, cim, 'PowerTransformer', xfmr)
+
+    with pytest.raises(ValueError, match="one terminal's node/bus columns"):
+        connectivity.add_connectivity(network, end, node_cols={'node1': 'n1'}, bus_cols={'bus2': 'b2'})
 
 
 def test_switch_sides_can_differ_and_pair_by_position(network):

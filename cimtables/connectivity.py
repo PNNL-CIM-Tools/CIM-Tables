@@ -32,14 +32,16 @@ def _parent_assoc_field(phase_cls: type, parent: object) -> str:
     )
 
 
-def _resolve_node(network: GraphModel, col_name: str, node_mrid: str) -> CN.ConnectivityNode | CN.TopologicalNode:
-    """The ConnectivityNode/TopologicalNode for a connectivity column, auto-vivified if new."""
-    if col_name not in synthetic.CONNECTIVITY_COLUMNS:
+def _resolve_node(network: GraphModel, col_name: str, node_mrid: str,
+                  node_class_name: str) -> CN.ConnectivityNode | CN.TopologicalNode:
+    """The node_class_name (ConnectivityNode/TopologicalNode) for a connectivity column, auto-vivified if new."""
+    if synthetic.CONNECTIVITY_COLUMNS.get(col_name, ('', 0))[0] != node_class_name:
+        valid = [c for c, (cls_name, _) in synthetic.CONNECTIVITY_COLUMNS.items() if cls_name == node_class_name]
         raise ValueError(
-            f"{col_name!r} is not a connectivity column (one of {list(synthetic.CONNECTIVITY_COLUMNS)}, "
+            f"{col_name!r} is not a {node_class_name} connectivity column (one of {valid}, "
             f"per CIMTBL_DESIGN.md §3.5)"
         )
-    node_cls = getattr(network.cim, synthetic.CONNECTIVITY_COLUMNS[col_name][0])
+    node_cls = getattr(network.cim, node_class_name)
     node_obj = graph_write.resolve(network, node_cls, node_mrid)
     if node_obj is None:
         node_obj = node_cls(mRID=node_mrid)
@@ -47,70 +49,81 @@ def _resolve_node(network: GraphModel, col_name: str, node_mrid: str) -> CN.Conn
     return node_obj
 
 
-def _add_end_terminal(network: GraphModel, end: CN.TransformerEnd, node_cols: dict[str, str]) -> CN.Terminal:
-    """A TransformerEnd row's node (or bus) column: the Terminal belongs to the end's
-    PowerTransformer (the ConductingEquipment), sequenceNumber = endNumber,
-    and end.Terminal points at it. The PowerTransformer FK must already be set."""
-    cim = network.cim
-    if len(node_cols) != 1:
-        raise ValueError(f"{end.mRID!r}: a TransformerEnd takes exactly one node/bus column, got {list(node_cols)}")
-    transformer = getattr(end, 'PowerTransformer', None)
-    if transformer is None or end.endNumber is None:
-        raise ValueError(f"{end.mRID!r}: a node/bus column on a TransformerEnd needs its PowerTransformer and endNumber")
-
-    [(col_name, node_mrid)] = node_cols.items()
-    node_obj = _resolve_node(network, col_name, node_mrid)
-    if transformer.EquipmentContainer is not None and node_obj.ConnectivityNodeContainer is None:
-        graph_write.set_assc(node_obj, cim, 'ConnectivityNodeContainer', transformer.EquipmentContainer)
-
-    terminal = cim.Terminal(mRID=f'{transformer.mRID}_T{end.endNumber}', sequenceNumber=end.endNumber)
-    graph_write.set_assc(terminal, cim, 'ConductingEquipment', transformer)
-    graph_write.set_assc(terminal, cim, synthetic.CONNECTIVITY_COLUMNS[col_name][0], node_obj)
-    graph_write.set_assc(end, cim, 'Terminal', terminal)
-    graph_write.add_to_graph(network, terminal)
-    return terminal
-
-
-def add_connectivity(network: GraphModel, equipment: CN.ConductingEquipment|CN.TransformerEnd, *, node_cols: dict[str, str],
-                      equipment_container: CN.EquipmentContainer | None = None) -> list[CN.Terminal]:
+def add_connectivity(network: GraphModel, equipment: CN.ConductingEquipment|CN.TransformerEnd, *,
+                     node_cols: dict[str, str] | None = None, bus_cols: dict[str, str] | None = None,
+                     equipment_container: CN.EquipmentContainer | None = None) -> list[CN.Terminal]:
     """node_cols is the {'node1': 'RG60', 'node2': '362'} slice of a <Class>Row
-    (node/bus mRIDs). Each column fixes its node class and Terminal
-    sequenceNumber (synthetic.CONNECTIVITY_COLUMNS), so header order doesn't
-    matter; an unknown column or two columns on one sequenceNumber raise.
-    Auto-vivifies any mRID not found via resolve(). Returns Terminals in
-    sequenceNumber order.
+    (ConnectivityNode mRIDs), bus_cols the {'bus1': ..., 'bus2': ...} slice
+    (TopologicalNode mRIDs). Give either or both: node1 + bus1 put one
+    Terminal on both its ConnectivityNode and its TopologicalNode (node-breaker
+    detail plus bus-branch topology, as PSS/E RAW's substation node data
+    does). Each column fixes its Terminal sequenceNumber
+    (synthetic.CONNECTIVITY_COLUMNS), so header order doesn't matter; a
+    column of the wrong kind, or two node (or two bus) columns on one
+    sequenceNumber, raise. Auto-vivifies any mRID not found via resolve().
+    Returns Terminals in sequenceNumber order.
+
+    A TransformerEnd takes one terminal's worth (a node and/or a bus): the
+    Terminal belongs to the end's PowerTransformer (the ConductingEquipment),
+    sequenceNumber = endNumber, and end.Terminal points at it. The
+    PowerTransformer FK must already be set.
 
     Sets equipment.EquipmentContainer from `equipment_container`, falling back
-    to network.container when not given. Propagates the same container onto
-    every node touched (ConnectivityNodeContainer), without overwriting one
-    already set."""
+    to network.container when not given (a TransformerEnd's nodes take the
+    PowerTransformer's container instead). Propagates the same container
+    onto every node touched (ConnectivityNodeContainer), without overwriting
+    one already set."""
     cim:CN = network.cim # type:ignore
-    if isinstance(equipment, cim.TransformerEnd):
-        return [_add_end_terminal(network, equipment, node_cols)]
+    nodes_by_sequence: dict[int, dict[str, CN.ConnectivityNode | CN.TopologicalNode]] = {}
+    for node_class_name, cols in (('ConnectivityNode', node_cols or {}), ('TopologicalNode', bus_cols or {})):
+        for col_name, node_mrid in cols.items():
+            node_obj = _resolve_node(network, col_name, node_mrid, node_class_name)
+            nodes = nodes_by_sequence.setdefault(synthetic.CONNECTIVITY_COLUMNS[col_name][1], {})
+            if node_class_name in nodes:
+                raise ValueError(
+                    f"{equipment.mRID!r}: {list(cols)} put two {node_class_name} columns on terminal "
+                    f"{synthetic.CONNECTIVITY_COLUMNS[col_name][1]}"
+                )
+            nodes[node_class_name] = node_obj
+    if not nodes_by_sequence:
+        raise ValueError(f"{equipment.mRID!r}: add_connectivity needs at least one node or bus column")
 
-    resolved_container = equipment_container if equipment_container is not None else network.container
-    has_container = isinstance(resolved_container, cim.EquipmentContainer)
+    is_end = isinstance(equipment, cim.TransformerEnd)
+    if is_end:
+        transformer = getattr(equipment, 'PowerTransformer', None)
+        if transformer is None or equipment.endNumber is None:
+            raise ValueError(
+                f"{equipment.mRID!r}: a node/bus column on a TransformerEnd needs its PowerTransformer and endNumber"
+            )
+        if len(nodes_by_sequence) != 1:
+            raise ValueError(
+                f"{equipment.mRID!r}: a TransformerEnd takes one terminal's node/bus columns, "
+                f"got {list(node_cols or {})} + {list(bus_cols or {})}"
+            )
+        [nodes] = nodes_by_sequence.values()
+        nodes_by_sequence = {equipment.endNumber: nodes}
+        terminal_owner, container = transformer, transformer.EquipmentContainer
+    else:
+        terminal_owner = equipment
+        container = equipment_container if equipment_container is not None else network.container
+    has_container = isinstance(container, cim.EquipmentContainer)
 
-    terminals_by_sequence: dict[int, CN.Terminal] = {}
-    for col_name, node_mrid in node_cols.items():
-        node_obj = _resolve_node(network, col_name, node_mrid)
-        node_field, sequence_number = synthetic.CONNECTIVITY_COLUMNS[col_name]
-        if sequence_number in terminals_by_sequence:
-            raise ValueError(f"{equipment.mRID!r}: {list(node_cols)} put two columns on terminal {sequence_number}")
-
-        if has_container and node_obj.ConnectivityNodeContainer is None:
-            graph_write.set_assc(node_obj, cim, 'ConnectivityNodeContainer', resolved_container)
-
-        terminal = cim.Terminal(mRID=f'{equipment.mRID}_T{sequence_number}', sequenceNumber=sequence_number)
-        graph_write.set_assc(terminal, cim, 'ConductingEquipment', equipment)
-        graph_write.set_assc(terminal, cim, node_field, node_obj)
+    terminals = []
+    for sequence_number in sorted(nodes_by_sequence):
+        terminal = cim.Terminal(mRID=f'{terminal_owner.mRID}_T{sequence_number}', sequenceNumber=sequence_number)
+        graph_write.set_assc(terminal, cim, 'ConductingEquipment', terminal_owner)
+        for node_field, node_obj in nodes_by_sequence[sequence_number].items():  # node class name = Terminal field
+            if has_container and node_obj.ConnectivityNodeContainer is None:
+                graph_write.set_assc(node_obj, cim, 'ConnectivityNodeContainer', container)
+            graph_write.set_assc(terminal, cim, node_field, node_obj)
         graph_write.add_to_graph(network, terminal)
-        terminals_by_sequence[sequence_number] = terminal
+        terminals.append(terminal)
 
-    if has_container:
-        graph_write.set_assc(equipment, cim, 'EquipmentContainer', resolved_container)
-
-    return [terminals_by_sequence[n] for n in sorted(terminals_by_sequence)]
+    if is_end:
+        graph_write.set_assc(equipment, cim, 'Terminal', terminals[0])
+    elif has_container:
+        graph_write.set_assc(equipment, cim, 'EquipmentContainer', container)
+    return terminals
 
 
 _PHASE_TOKEN = re.compile(r's1|s2|[ABCN]')
