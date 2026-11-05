@@ -38,6 +38,7 @@ unit: "(" UNIT_TEXT ")"
 table_row: cell ("," cell)* _NL+
 
 cell: VALUE -> value
+    | QUOTED -> quoted
     | -> blank
 
 PROFILE.3: "Profile"
@@ -47,7 +48,8 @@ IMPORT.3: "Import"
 OBJECT.3: "Object"
 TABLE.3: "Table"
 NAME.2: /[A-Za-z_][A-Za-z0-9_]*/
-VALUE: /[^,()\s#][^,()\n#]*/   // never starts with whitespace, so an indented comment line is not a blank cell
+VALUE: /[^,()\s#"][^,()\n#]*/   // never starts with whitespace, so an indented comment line is not a blank cell
+QUOTED: /"([^"\n]|"")*"/       // CSV-style: , # ( ) are literal inside, "" is one embedded quote
 UNIT_TEXT: /[^()\n]+/
 FILENAME: /[^\s#][^\n#]*\.cimtbl/
 

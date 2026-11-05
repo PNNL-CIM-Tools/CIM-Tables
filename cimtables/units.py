@@ -13,8 +13,9 @@ class Qty:
     """Value + unit carrier. Mirrors the .cimtbl header 'r (ohm)'.
 
     base: which base a RELATIVE unit (pu/percent) is against.
-      None -> sensible default per unit (percent->'winding', pu->'system');
-      a table-level baseKind sets the default, and this field OVERRIDES it.
+      None -> chosen by class shape (impedance.z_base: the rating pair, else
+      the system base); 'system' -> always the system base, from a
+      `(pu system)` / `(percent system)` header suffix.
     """
 
     value: float

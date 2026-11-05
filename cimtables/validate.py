@@ -265,8 +265,16 @@ def validate(record: records.RawRecord, *, profile: str | None = None) -> object
         elif kind == _FieldKind.REFERENCE:
             row_kwargs[field_name] = raw
         elif kind == _FieldKind.QUANTITY:
+            # `(pu system)` / `(percent system)`: a relative unit on the system
+            # base instead of the class's own rating (PSS/E's SBASE impedances)
+            unit, _, base = (record.units.get(field_name) or '').partition(' ')
+            if base and (unit not in ('pu', 'percent') or base.strip() != 'system'):
+                raise CimtblValidationError(
+                    f"{record.source_file}:{record.source_line}: {field_name!r} unit "
+                    f"{record.units[field_name]!r}: only pu/percent take a base, and only 'system'"
+                )
             try:
-                row_kwargs[field_name] = Qty(float(raw), record.units.get(field_name) or '')
+                row_kwargs[field_name] = Qty(float(raw), unit, base='system' if base else None)
             except ValueError as exc:
                 raise CimtblValidationError(
                     f"{record.source_file}:{record.source_line}: {field_name!r} expected a number, got {raw!r}"

@@ -102,4 +102,12 @@ The same `z_base` converts r/x/r0/x0 (ohm = pu x z_base) and bch/gch/b0ch/g0ch
 realistic convention for a line; `percent` is accepted but is a nameplate
 convention for transformer tanks.
 
+A column can name its base explicitly instead: `x (pu system)` (or
+`(percent system)`) always uses the system base, even on a rated class. This
+is for source data that is already on SBASE, e.g. PSS/E transformer
+impedances on the system MVA base; on a `PowerTransformerEnd` that is its own
+`BaseVoltage` and `network.base_power`. The choice is still made by the
+table's shape (its header), never by which values are set, and a plain
+`(pu)` keeps the class-shape rule above. `system` is the only base word.
+
 A `BasePower` object in the model does not set `network.base_power` yet.

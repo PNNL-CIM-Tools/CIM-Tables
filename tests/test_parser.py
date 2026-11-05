@@ -363,3 +363,23 @@ def test_ieee13_validates_end_to_end_through_phase2():
 def test_grammar_builds_lalr_without_ambiguity():
     grammar_path = Path(parser.__file__).parent / 'grammar.lark'
     lark.Lark(grammar_path.read_text(), parser='lalr', propagate_positions=True)
+
+
+def test_quoted_cells_take_comma_hash_and_parens_literally():
+    records, _ = _parse(
+        'Table WireInfo: mRID, name, description\n'
+        '    "#2_ACSR_6/1", "DEFAULT (DC)", "a, b # not a comment"  # a real comment\n'
+        '    plain, "  padded  ", "say ""hi"""\n'
+    )
+    assert records[0].fields == {'mRID': '#2_ACSR_6/1', 'name': 'DEFAULT (DC)', 'description': 'a, b # not a comment'}
+    assert records[1].fields == {'mRID': 'plain', 'name': '  padded  ', 'description': 'say "hi"'}
+
+
+def test_quoted_empty_string_is_not_unset():
+    records, _ = _parse('Object WireInfo: mRID=w, name="", description=\n')
+    assert records[0].fields == {'mRID': 'w', 'name': '', 'description': None}
+
+
+def test_quoted_header_default():
+    records, _ = _parse('Table WireInfo: mRID, name="DEFAULT (DC)"\n    w1\n')
+    assert records[0].fields == {'mRID': 'w1', 'name': 'DEFAULT (DC)'}

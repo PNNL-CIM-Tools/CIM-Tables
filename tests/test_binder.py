@@ -206,3 +206,22 @@ def test_pu_impedance_without_base_voltage_raises(network):
 
 
 
+
+
+def test_pu_system_column_puts_a_rated_end_on_the_system_base(network):
+    # PSS/E SBASE impedances: (pu system) skips the end's own ratedU/ratedS
+    # for its BaseVoltage and network.base_power; a plain (percent) column on
+    # the same row still uses the rating pair
+    _bind_text(network, _PU_LINE + (
+        'Object PowerTransformerEnd: mRID=end_1, BaseVoltage=bv_115kv, ratedU (kV)=115, ratedS (MVA)=50, '
+        'x (pu system)=0.1, r (percent)=1.1\n'
+    ))
+    end = graph_write.resolve(network, cim.PowerTransformerEnd, 'end_1')
+    assert end.x.to('ohm') == pytest.approx(0.1 * 115000 ** 2 / 100e6)
+    assert end.r.to('ohm') == pytest.approx(0.011 * 115000 ** 2 / 50e6)
+
+
+@pytest.mark.parametrize('unit', ['ohm system', 'pu winding'])
+def test_only_pu_or_percent_take_only_the_system_base(network, unit):
+    with pytest.raises(validate.CimtblValidationError, match="only pu/percent take a base, and only 'system'"):
+        _bind_text(network, f'Object ACLineSegment: mRID=line_1, r ({unit})=0.01\n')

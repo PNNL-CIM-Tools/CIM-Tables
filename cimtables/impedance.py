@@ -8,7 +8,9 @@ from cimprofiles.units.units import CIMUnit, ureg
 from cimtables.units import Qty
 
 
-def z_base(obj: object, from_targets: list[object], base_power: CIMUnit | Qty | float | None) -> float:
+def z_base(
+    obj: object, from_targets: list[object], base_power: CIMUnit | Qty | float | None, *, system_base: bool = False
+) -> float:
     """Impedance base U²/S in ohms for obj's pu/percent values.
 
     Which U and S is decided by class shape, never by which values happen to
@@ -22,9 +24,11 @@ def z_base(obj: object, from_targets: list[object], base_power: CIMUnit | Qty | 
        BaseVoltage.nominalVoltage, or nomU where the class has it
        (ShuntCompensator; it must be set), and `base_power` (network.base_power, a
        CIMUnit, a Qty such as Qty(100, 'MVA'), or a plain number in VA).
+    `system_base=True` (a `(pu system)` column, Qty.base == 'system') skips
+    step 1, e.g. a PowerTransformerEnd's BaseVoltage on PSS/E's SBASE.
     Raises ValueError naming what is missing."""
-    
-    for candidate in [obj, *from_targets]:
+
+    for candidate in [] if system_base else [obj, *from_targets]:
         u_attr, s_attr = ('baseU', 'baseS') if hasattr(candidate, 'baseU') else ('ratedU', 'ratedS')
         if not hasattr(candidate, s_attr):
             continue

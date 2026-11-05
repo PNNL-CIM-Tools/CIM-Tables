@@ -16,13 +16,16 @@ _LARK_PARSER = lark.Lark(
 
 
 def _cell_text(cell_node: lark.Tree) -> str | None:
-    """A `cell` node is either `value` (one VALUE token, possibly with
-    incidental leading/trailing whitespace the grammar doesn't strip) or
-    `blank` (no token at all). Either way, empty-after-stripping = None
-    (§12.1) - a lone space between two commas is indistinguishable in
-    intent from no character at all."""
+    """A `cell` node is `value` (one VALUE token, possibly with incidental
+    leading/trailing whitespace the grammar doesn't strip), `quoted` (a
+    CSV-style "..." token) or `blank` (no token at all). A blank or
+    empty-after-stripping value is None (§12.1) - a lone space between two
+    commas is indistinguishable in intent from no character at all. A quoted
+    cell is taken verbatim, `""` -> `"`, so `""` is the empty string, not unset."""
     if cell_node.data == 'blank':
         return None
+    if cell_node.data == 'quoted':
+        return str(cell_node.children[0])[1:-1].replace('""', '"')
     text = str(cell_node.children[0]).strip()
     return text or None
 
@@ -134,7 +137,7 @@ def _ensure_trailing_newline(text: str) -> str:
     return text if text.endswith('\n') else text + '\n'
 
 
-def parse_text(text: str, source_file: str) -> tuple[list[RawRecord], Header]:
+def parse_text(text: str, source_file: str = '<text>') -> tuple[list[RawRecord], Header]:
     """Parse `.cimtbl` source already in memory. Returns (records, header)
     - `header` holds the file's own Profile/Authority/Model statements.
     Import statements are NOT resolved here (no filesystem access at this

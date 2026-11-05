@@ -89,3 +89,26 @@ def test_model_scope_survives_an_xml_round_trip(tmp_path, model_scope):
     read_back = FeederModel(connection=XMLFile(filename=str(out)), container=None, distributed=False)
     assert (get_model_authority(), get_model_name()) == ('https://example.org/utility', 'ieee13')
     assert read_back.find_by_mRID('src').identifier == network.find_by_mRID('src').identifier
+
+
+def test_load_text_binds_a_snippet_onto_an_existing_network():
+    network = NodeBreakerModel(container=None, connection=None, distributed=False)
+    cimtables.load_text("""
+Object Feeder: mRID=fdr_ieee13nodeckt
+Table PowerElectronicsConnection: mRID
+    storage_school
+    storage_batidle
+Table BatteryUnit: mRID, ratedE (kWh), storedE (kWh), batteryState, PowerElectronicsConnection, EquipmentContainer=fdr_ieee13nodeckt
+    storage_school_unit,  200,  100, discharging, storage_school
+    storage_batidle_unit, 200,  100, waiting,     storage_batidle
+""", network)
+    unit = network.find_by_mRID('storage_school_unit')
+    assert unit.ratedE.to('kWh') == 200
+    assert unit.PowerElectronicsConnection is network.find_by_mRID('storage_school')
+    assert unit.EquipmentContainer is network.find_by_mRID('fdr_ieee13nodeckt')
+
+
+def test_load_text_rejects_an_import():
+    network = NodeBreakerModel(container=None, connection=None, distributed=False)
+    with pytest.raises(ValueError, match=r"Import 'lines.cimtbl' needs a file"):
+        cimtables.load_text('Import lines.cimtbl\n', network)

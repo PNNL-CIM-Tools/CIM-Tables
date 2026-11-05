@@ -65,3 +65,9 @@ def test_system_base_needs_base_voltage_and_base_power():
         impedance.z_base(cim.ACLineSegment(mRID='line'), [], _SYSTEM)
     with pytest.raises(ValueError, match='base_power'):
         impedance.z_base(cim.ACLineSegment(mRID='line', BaseVoltage=bv), [], None)
+
+
+def test_system_base_flag_skips_the_rating_pair():
+    bv = cim.BaseVoltage(mRID='bv', nominalVoltage=cim.Voltage(115, 'kV'))
+    end = cim.PowerTransformerEnd(mRID='end', BaseVoltage=bv, ratedU=cim.Voltage(115, 'kV'))
+    assert impedance.z_base(end, [], _SYSTEM, system_base=True) == pytest.approx(115e3 ** 2 / 100e6)

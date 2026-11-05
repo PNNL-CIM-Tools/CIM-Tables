@@ -25,7 +25,7 @@ from cimtables.validate import CimtblValidationError
 __all__ = [
     'bind_row', 'connectivity', 'graph_write', 'synthetic', 'validate',
     'Header', 'parse_file', 'parse_text', 'RawRecord', 'Qty',
-    'CimtblValidationError', 'load', 'load_model',
+    'CimtblValidationError', 'load', 'load_text', 'load_model',
 ]
 
 
@@ -38,6 +38,18 @@ def load(path, network):
     The file's Authority=/Model= set the model scope its UUIDs are seeded
     under; its Profile= (if any) is the one rows are validated against."""
     records, header = parse_file(path)
+    _set_model_scope(header)
+    return [bind_row(network, validate.validate(r, profile=header.profile)) for r in records]
+
+
+def load_text(text: str, network, source_file: str = '<text>'):
+    """load() for .cimtbl source already in memory, e.g. a snippet in a
+    script or test; returns the bound objects in order. Import statements
+    need a file to resolve against, so they raise here - use load()."""
+    records, header = parse_text(text, source_file=source_file)
+    for record in records:
+        if record.cim_class == '__import__':
+            raise ValueError(f"{source_file}: Import {record.fields['path']!r} needs a file; use load(path, network)")
     _set_model_scope(header)
     return [bind_row(network, validate.validate(r, profile=header.profile)) for r in records]
 
