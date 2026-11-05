@@ -8,27 +8,34 @@ from cimprofiles.units.units import CIMUnit, ureg
 from cimtables.units import Qty
 
 
-def z_base(
-    obj: object, from_targets: list[object], base_power: CIMUnit | Qty | float | None, *, system_base: bool = False
-) -> float:
+def z_base(obj: object, system_base: CIMUnit | Qty | float | None, *, on_system_base: bool = False) -> float:
     """Impedance base U²/S in ohms for obj's pu/percent values.
 
     Which U and S is decided by class shape, never by which values happen to
     be set, so a missing rating fails instead of silently using another base:
-    1. obj itself, else its first From* target (TransformerMeshImpedance's
-       FromWinding/FromTransformerEnd: CIM's "the 'from' end ... determines
-       the voltage reference"), if that class is rated: baseU/baseS where the
-       class has them (TransformerWinding: coil voltage, common tank kVA),
-       else ratedU/ratedS (PowerTransformerEnd). Both must be set.
+    1. obj itself, else the target of one of its From* references
+       (TransformerMeshImpedance's FromWinding/FromTransformerEnd: CIM's "the
+       'from' end ... determines the voltage reference"), if that class is
+       rated: baseU/baseS where the class has them (TransformerWinding: coil
+       voltage, common tank kVA), else ratedU/ratedS (PowerTransformerEnd).
+       Both must be set.
     2. else the system base (ACLineSegment, EnergySource): obj's own
        BaseVoltage.nominalVoltage, or nomU where the class has it
-       (ShuntCompensator; it must be set), and `base_power` (network.base_power, a
-       CIMUnit, a Qty such as Qty(100, 'MVA'), or a plain number in VA).
-    `system_base=True` (a `(pu system)` column, Qty.base == 'system') skips
-    step 1, e.g. a PowerTransformerEnd's BaseVoltage on PSS/E's SBASE.
+       (ShuntCompensator; it must be set), and `system_base`, the system base
+       power (network.base_power, a CIMUnit, a Qty such as Qty(100, 'MVA'), or
+       a plain number in VA).
+    `on_system_base=True` (a Qty with base='system', a `(pu system)` column)
+    skips step 1, e.g. a PowerTransformerEnd's BaseVoltage on PSS/E's SBASE.
     Raises ValueError naming what is missing."""
 
-    for candidate in [] if system_base else [obj, *from_targets]:
+    # single-valued From* references only: a list one (TransformerEnd.
+    # FromMeshImpedance) is the inverse side and never the base source
+    from_targets = []
+    for name in getattr(obj, '__dataclass_fields__', {}):
+        target = getattr(obj, name)
+        if name.startswith('From') and target is not None and not isinstance(target, list):
+            from_targets.append(target)
+    for candidate in [] if on_system_base else [obj, *from_targets]:
         u_attr, s_attr = ('baseU', 'baseS') if hasattr(candidate, 'baseU') else ('ratedU', 'ratedS')
         if not hasattr(candidate, s_attr):
             continue
@@ -46,15 +53,15 @@ def z_base(
     else:
         nominal_voltage = getattr(getattr(obj, 'BaseVoltage', None), 'nominalVoltage', None)
         voltage_source = 'a BaseVoltage with nominalVoltage'
-    if nominal_voltage is None or base_power is None:
+    if nominal_voltage is None or system_base is None:
         raise ValueError(
             f"{type(obj).__name__} {getattr(obj, 'mRID', obj)!r}: a pu/percent impedance needs "
-            f"a rated From* reference, or {voltage_source} and a network base_power"
+            f"a rated From* reference, or {voltage_source} and a system_base power"
         )
-    if isinstance(base_power, Qty):
-        base_va = ureg.Quantity(base_power.value, base_power.unit).to('VA').magnitude
-    elif isinstance(base_power, CIMUnit):
-        base_va = base_power.to('VA')
+    if isinstance(system_base, Qty):
+        base_va = ureg.Quantity(system_base.value, system_base.unit).to('VA').magnitude
+    elif isinstance(system_base, CIMUnit):
+        base_va = system_base.to('VA')
     else:
-        base_va = float(base_power)
+        base_va = float(system_base)
     return nominal_voltage.to('V') ** 2 / base_va

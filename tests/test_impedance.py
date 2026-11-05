@@ -24,7 +24,7 @@ def test_base_ratings_win_over_rated_on_a_winding():
     half_winding = SimpleNamespace(
         baseU=cim.Voltage(120, 'V'), baseS=cim.ApparentPower(250, 'kVA'),
         ratedU=cim.Voltage(240, 'V'), ratedS=cim.ApparentPower(125, 'kVA'))
-    assert impedance.z_base(half_winding, [], _SYSTEM) == pytest.approx(120 ** 2 / 250e3)
+    assert impedance.z_base(half_winding, _SYSTEM) == pytest.approx(120 ** 2 / 250e3)
 
 
 def test_unset_base_rating_raises_without_fallback_to_rated():
@@ -32,42 +32,42 @@ def test_unset_base_rating_raises_without_fallback_to_rated():
         baseU=cim.Voltage(120, 'V'), baseS=None,
         ratedU=cim.Voltage(240, 'V'), ratedS=cim.ApparentPower(125, 'kVA'))
     with pytest.raises(ValueError, match='baseU and baseS'):
-        impedance.z_base(half_winding, [], _SYSTEM)
+        impedance.z_base(half_winding, _SYSTEM)
 
 
 def test_rated_ratings_on_a_class_without_base_ratings():
     end = cim.PowerTransformerEnd(mRID='end', ratedU=cim.Voltage(12470, 'V'), ratedS=cim.ApparentPower(200, 'kVA'))
-    assert impedance.z_base(end, [], _SYSTEM) == pytest.approx(12470 ** 2 / 200e3)
+    assert impedance.z_base(end, _SYSTEM) == pytest.approx(12470 ** 2 / 200e3)
 
 
 def test_unrated_object_uses_from_target_rating():
-    mesh = cim.TransformerMeshImpedance(mRID='mesh')
     from_end = cim.PowerTransformerEnd(mRID='end', ratedU=cim.Voltage(4160, 'V'), ratedS=cim.ApparentPower(500, 'kVA'))
-    assert impedance.z_base(mesh, [from_end], _SYSTEM) == pytest.approx(4160 ** 2 / 500e3)
+    mesh = cim.TransformerMeshImpedance(mRID='mesh', FromTransformerEnd=from_end)
+    assert impedance.z_base(mesh, _SYSTEM) == pytest.approx(4160 ** 2 / 500e3)
 
 
 def test_rated_class_with_unset_rating_raises_instead_of_system_base():
     bv = cim.BaseVoltage(mRID='bv', nominalVoltage=cim.Voltage(115, 'kV'))
     end = cim.PowerTransformerEnd(mRID='end', BaseVoltage=bv, ratedU=cim.Voltage(115, 'kV'))
     with pytest.raises(ValueError, match='ratedU and ratedS'):
-        impedance.z_base(end, [], _SYSTEM)
+        impedance.z_base(end, _SYSTEM)
 
 
 def test_unrated_class_uses_system_base():
     bv = cim.BaseVoltage(mRID='bv', nominalVoltage=cim.Voltage(115, 'kV'))
     line = cim.ACLineSegment(mRID='line', BaseVoltage=bv)
-    assert impedance.z_base(line, [], _SYSTEM) == pytest.approx(115e3 ** 2 / 100e6)
+    assert impedance.z_base(line, _SYSTEM) == pytest.approx(115e3 ** 2 / 100e6)
 
 
-def test_system_base_needs_base_voltage_and_base_power():
+def test_system_base_needs_base_voltage_and_system_base_power():
     bv = cim.BaseVoltage(mRID='bv', nominalVoltage=cim.Voltage(115, 'kV'))
     with pytest.raises(ValueError, match='BaseVoltage with nominalVoltage'):
-        impedance.z_base(cim.ACLineSegment(mRID='line'), [], _SYSTEM)
-    with pytest.raises(ValueError, match='base_power'):
-        impedance.z_base(cim.ACLineSegment(mRID='line', BaseVoltage=bv), [], None)
+        impedance.z_base(cim.ACLineSegment(mRID='line'), _SYSTEM)
+    with pytest.raises(ValueError, match='system_base power'):
+        impedance.z_base(cim.ACLineSegment(mRID='line', BaseVoltage=bv), None)
 
 
 def test_system_base_flag_skips_the_rating_pair():
     bv = cim.BaseVoltage(mRID='bv', nominalVoltage=cim.Voltage(115, 'kV'))
     end = cim.PowerTransformerEnd(mRID='end', BaseVoltage=bv, ratedU=cim.Voltage(115, 'kV'))
-    assert impedance.z_base(end, [], _SYSTEM, system_base=True) == pytest.approx(115e3 ** 2 / 100e6)
+    assert impedance.z_base(end, _SYSTEM, on_system_base=True) == pytest.approx(115e3 ** 2 / 100e6)

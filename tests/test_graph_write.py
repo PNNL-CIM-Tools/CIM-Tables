@@ -62,28 +62,30 @@ def test_set_attr_qty_on_non_quantity_attr_raises():
         graph_write.set_attr(bv, cim, 'name', Qty(1.0, 'V'))
 
 
-def test_set_attr_relative_ohm_converts_against_z_base():
-    line = cim.ACLineSegment(mRID='line')
-    graph_write.set_attr(line, cim, 'r', Qty(2.0, 'percent'), z_base=1000.0)
-    assert line.r.to('ohm') == pytest.approx(20.0)
+def test_set_attr_relative_ohm_uses_the_objects_rating():
+    end = cim.PowerTransformerEnd(mRID='end', ratedU=cim.Voltage(10, 'kV'), ratedS=cim.ApparentPower(100, 'kVA'))
+    graph_write.set_attr(end, cim, 'r', Qty(2.0, 'percent'))
+    assert end.r.to('ohm') == pytest.approx(0.02 * 10e3 ** 2 / 100e3)
 
 
-def test_set_attr_relative_ohm_without_z_base_raises():
-    line = cim.ACLineSegment(mRID='line')
-    with pytest.raises(ValueError, match='needs a z_base'):
+def test_set_attr_relative_siemens_divides_by_the_system_base():
+    line = cim.ACLineSegment(mRID='line', BaseVoltage=cim.BaseVoltage(mRID='bv', nominalVoltage=cim.Voltage(10, 'kV')))
+    graph_write.set_attr(line, cim, 'bch', Qty(5.0, 'percent'), system_base=cim.ApparentPower(100, 'MVA'))
+    assert line.bch.to('S') == pytest.approx(0.05 / (10e3 ** 2 / 100e6))
+
+
+def test_set_attr_relative_on_the_system_base_without_system_base_raises():
+    line = cim.ACLineSegment(mRID='line', BaseVoltage=cim.BaseVoltage(mRID='bv', nominalVoltage=cim.Voltage(10, 'kV')))
+    with pytest.raises(ValueError, match='system_base power'):
         graph_write.set_attr(line, cim, 'r', Qty(2.0, 'percent'))
 
 
-def test_set_attr_relative_siemens_divides_by_z_base():
-    line = cim.ACLineSegment(mRID='line')
-    graph_write.set_attr(line, cim, 'bch', Qty(5.0, 'percent'), z_base=0.001)
-    assert line.bch.to('S') == pytest.approx(50.0)
-
-
-def test_set_attr_relative_siemens_without_z_base_raises():
-    line = cim.ACLineSegment(mRID='line')
-    with pytest.raises(ValueError, match='needs a z_base'):
-        graph_write.set_attr(line, cim, 'bch', Qty(5.0, 'percent'))
+def test_set_attr_pu_system_qty_skips_the_objects_rating():
+    end = cim.PowerTransformerEnd(
+        mRID='end', BaseVoltage=cim.BaseVoltage(mRID='bv', nominalVoltage=cim.Voltage(115, 'kV')),
+        ratedU=cim.Voltage(115, 'kV'), ratedS=cim.ApparentPower(50, 'MVA'))
+    graph_write.set_attr(end, cim, 'x', Qty(0.1, 'pu', base='system'), system_base=cim.ApparentPower(100, 'MVA'))
+    assert end.x.to('ohm') == pytest.approx(0.1 * 115e3 ** 2 / 100e6)
 
 
 def test_set_attr_bool_field_rejects_str():

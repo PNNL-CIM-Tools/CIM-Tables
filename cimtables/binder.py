@@ -42,12 +42,11 @@ to check against. See CIM-Builder's development/PROFILE_RESOLUTION.md.
 import dataclasses
 
 from cimgraph.models import GraphModel
-from cimtables import connectivity, graph_write, impedance, synthetic, validate
+from cimtables import connectivity, graph_write, synthetic, validate
 from cimtables.units import Qty
 
 _SKIP_FIELDS = {'mRID', 'identifier', 'source_file', 'source_line'}
 _CONTAINER_FIELD = 'EquipmentContainer'
-_FROM_PREFIX = 'From'
 
 
 def _new_object(cim_cls: type, row: object) -> object:
@@ -115,7 +114,6 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
             graph_write.set_attr(obj, network.cim, f.name, value)
 
     # FKs first: a TransformerEnd's terminal goes on its PowerTransformer
-    from_targets = []
     for attr, mRID in deferred_fks:
         target_cls_name = validate.reference_target_class(row_cls_name, attr)
         # The slot's range is often an abstract base (TransformerEnd, PerLengthImpedance)
@@ -126,8 +124,6 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
                 f"(declare it before rows that reference it)"
             )
         graph_write.set_assc(obj, network.cim, attr, target)
-        if attr.startswith(_FROM_PREFIX):
-            from_targets.append(target)
 
     has_container_slot = _CONTAINER_FIELD in ref_slots
     terminals = []
@@ -143,9 +139,9 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
     if phase_cols:
         connectivity.add_phase_children(network, obj, terminals, **phase_cols)
 
+    # last: their base reads the ratings, BaseVoltage and From* set above
     for attr, qty in relative_qtys:
-        z_base = impedance.z_base(obj, from_targets, network.base_power, system_base=qty.base == 'system')
-        graph_write.set_attr(obj, network.cim, attr, qty, z_base=z_base)
+        graph_write.set_attr(obj, network.cim, attr, qty, system_base=network.base_power)
 
     graph_write.add_to_graph(network, obj)
     return obj

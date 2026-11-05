@@ -31,6 +31,7 @@ from typing import Type, TypeVar
 from cimgraph.models import GraphModel
 from cimprofiles.units.units import CIMUnit
 
+from cimtables import impedance
 from cimtables.units import Qty
 
 T = TypeVar("T")
@@ -63,7 +64,7 @@ def set_attr(
     attribute_name: str,
     attribute_value: object,
     *,
-    z_base: float | None = None,
+    system_base: CIMUnit | Qty | float | None = None,
 ) -> None:
     """Set a plain scalar, CIMUnit or Qty onto a live cim-graph object's attribute.
 
@@ -78,10 +79,14 @@ def set_attr(
       are per profile module); pint raises on a dimension mismatch
     - a Qty is converted from its `(unit)` into the field's CIMUnit. A
       pu/percent Qty on an ohm-typed attribute (r, x, r0, ...) is multiplied
-      by `z_base` (ohms, see impedance.z_base); on a siemens-typed one (b, g,
-      bch, ...) it is divided by it (admittance base = 1/z_base). Raises if no
-      z_base was given. Relative Qtys on other attributes (PerCent) are
-      converted like any other unit.
+      by impedance.z_base(source_object, system_base) (ohms); on a
+      siemens-typed one (b, g, bch, ...) it is divided by it (admittance base
+      = 1/z_base). The base comes from the object (its rating pair, a From*
+      target's, else its BaseVoltage and `system_base`, the system base power,
+      e.g. network.base_power), or always the system base for a Qty with
+      base='system'. So the object's ratings, BaseVoltage and From*
+      references must be set first. Relative Qtys on other attributes
+      (PerCent) are converted like any other unit.
     - anything else must be an instance of a declared type (str, int, UUID,
       an Enum, ...)
     Raises TypeError on a mismatch.
@@ -115,11 +120,7 @@ def set_attr(
             )
         unit_name = cim_unit_type(0).unit.name
         if attribute_value.is_relative() and unit_name in ("ohm", "S"):
-            if z_base is None:
-                raise ValueError(
-                    f"{where}: {attribute_value.unit!r} value needs a z_base, "
-                    f"but none was given for {getattr(source_object, 'mRID', source_object)!r}"
-                )
+            z_base = impedance.z_base(source_object, system_base, on_system_base=attribute_value.base == 'system')
             per_unit = attribute_value.value / 100 if attribute_value.unit == "percent" else attribute_value.value
             si_value = per_unit * z_base if unit_name == "ohm" else per_unit / z_base
             attribute_value = cim_unit_type(si_value)
