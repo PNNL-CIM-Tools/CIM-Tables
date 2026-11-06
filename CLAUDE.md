@@ -13,13 +13,13 @@ Git-tracked `.cimtbl` grid models (the target for migrating OpenDSS models) live
 ## Commands
 
 ```bash
-uv sync --extra dev                                  # install (cim-graph/cimprofiles are editable local paths, see below)
+uv sync                                              # install, dev group included (cim-graph/cimprofiles are editable local paths, see below)
 uv run pytest                                        # full suite
 uv run pytest tests/test_binder.py                   # one file
 uv run pytest tests/test_parser.py::test_name -q     # one test
 ```
 
-`pyproject.toml` `[tool.uv.sources]` points `cim-graph` and `cimprofiles` at sibling checkouts (`/home/ande188/CIM-Graph`, `/home/ande188/CIM-Profiles`), and `prerelease = "allow"` is required for their pre-release deps. Changes in those repos take effect here immediately.
+`pyproject.toml` `[tool.uv.sources]` points `cim-graph` and `cimprofiles` at sibling checkouts (`../CIM-Graph`, `../CIM-Profiles`), and `prerelease = "allow"` is required for their pre-release deps. Changes in those repos take effect here immediately.
 
 ## Pipeline architecture
 

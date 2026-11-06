@@ -10,6 +10,7 @@ subclassing required at all. A consumer who only wants ".cimtbl in, live
 cim-graph objects out" never needs anything else from this package."""
 
 import os
+from importlib.metadata import version
 
 from cimgraph.core import get_cim_profile, get_model_authority, get_model_name, set_model_scope
 from cimgraph.models import BusBranchModel, FeederModel, GraphModel, NodeBreakerModel
@@ -21,6 +22,8 @@ from cimtables.parser import CimtblParseError, Header, parse_file, parse_text
 from cimtables.records import RawRecord
 from cimtables.units import Qty
 from cimtables.validate import CimtblValidationError
+
+__version__ = version('cimtables')
 
 __all__ = [
     'bind_row', 'connectivity', 'document', 'graph_write', 'synthetic', 'validate',

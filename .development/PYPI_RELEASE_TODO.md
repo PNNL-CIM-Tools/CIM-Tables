@@ -12,27 +12,29 @@ Audit of `rc1` @ 21c41f7 (2026-11-06). State: 223 tests pass on Python 3.10 and 
       version has everything used here: `cimprofiles.units.units` (`CIMUnit`, `ureg`),
       `cim18.cim18v17.connectivity_unbalanced`, Identity-only `PhaseImpedanceData`, the
       `EnergyConsumerPhase.phases` extension. Then raise the floor.
-- [ ] **Add upper bounds** the way cim-graph does (`cim-graph>=0.6.0a?,<0.7`, `cimprofiles>=…,<0.2`). Both are
-      pre-1.0 and cimtables reflects on their internals.
-- [ ] **`[tool.uv.sources]` has absolute paths** (`/home/ande188/CIM-Graph`, …). They ship in the sdist and break
+- [x] **Add upper bounds** the way cim-graph does (done: `cim-graph>=0.6.0a0,<0.7`, `cimprofiles>=0.1.0a4,<0.2`;
+      raise the floors with the two items above).
+- [x] **`[tool.uv.sources]` has absolute paths** (done: now `../CIM-Graph`, `../CIM-Profiles`) (`/home/ande188/CIM-Graph`, …). They ship in the sdist and break
       `uv sync` in any other clone. Switch to relative paths (`../CIM-Graph`) or move them out of
       `pyproject.toml`. Verify with `uv build --no-sources` plus a fresh-venv install from PyPI deps.
 
 ## P1: package metadata / build
 
-- [ ] `pyproject.toml`: add `license = "BSD-3-Clause"`, `license-files`, `authors`/`maintainers`, `keywords`,
+- [x] `pyproject.toml`: add `license = "BSD-3-Clause"`, `license-files`, `authors`/`maintainers`, `keywords`,
       `classifiers` (Development Status :: 3 - Alpha, Python 3.10–3.13, Topic :: Scientific/Engineering),
       and `[project.urls]` (https://github.com/PNNL-CIM-Tools/CIM-Tables, Issues, CIMTBL-Models).
-- [ ] sdist currently ships `CLAUDE.md`, `uv.lock`, `.development/` and `.gitignore`. Add
+- [x] (done: `.gitignore` remains, hatchling always adds it) sdist currently ships `CLAUDE.md`, `uv.lock`, `.development/` and `.gitignore`. Add
       `[tool.hatch.build.targets.sdist]` include/exclude (keep `tests/` + fixtures, LICENSE, README).
-- [ ] Add `cimtables/py.typed`. The package is fully annotated, and CIMHub/CIM-Builder import it.
-- [ ] Add `__version__` (`importlib.metadata.version('cimtables')`) to `__init__.py`.
-- [ ] Move `pytest`/`pre-commit` from the published `dev` extra to `[dependency-groups] dev` (PEP 735). Then update
+- [x] Add `cimtables/py.typed`. The package is fully annotated, and CIMHub/CIM-Builder import it.
+- [x] Add `__version__` (`importlib.metadata.version('cimtables')`) to `__init__.py`.
+- [x] Move `pytest`/`pre-commit` from the published `dev` extra to `[dependency-groups] dev` (PEP 735). Then update
       CLAUDE.md's `uv sync --extra dev`.
-- [ ] `pre-commit` is a dev dep but there's no `.pre-commit-config.yaml`. Add one (e.g. ruff) or drop the dep.
-- [ ] Pick the version: `0.1.0a1` is the natural choice while the deps are pre-release.
-- [ ] PNNL release paperwork: confirm the copyright holder (`PNNL-CIM-Tools` vs Battelle Memorial Institute) and
-      whether a DISCLAIMER/NOTICE file is required for a public PyPI release.
+- [x] `pre-commit` is a dev dep but there's no `.pre-commit-config.yaml`. Add one (e.g. ruff) or drop the dep
+      (done: dropped; add it back with a config when a linter is chosen).
+- [x] Pick the version: `0.1.0a1` is the natural choice while the deps are pre-release.
+- [x] PNNL release paperwork: confirm the copyright holder (`PNNL-CIM-Tools` vs Battelle Memorial Institute) and
+      whether a DISCLAIMER/NOTICE file is required for a public PyPI release (done: Battelle Memorial Institute in
+      LICENSE, PNNL's standard `DISCLAIMER.md`, both shipped as license files).
 
 ## P1: documentation (PyPI users can't see CIM-Builder's design docs)
 
