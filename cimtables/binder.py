@@ -29,8 +29,9 @@ converted to ohms/siemens against impedance.z_base: the rating pair of the
 row's own object if its class is rated (PowerTransformerEnd), else of its
 From* reference target (TransformerMeshImpedance's FromWinding/
 FromTransformerEnd), else the system base (the row's BaseVoltage and
-network.base_power) for a class with no rating pair (ACLineSegment,
-EnergySource). A `(pu system)` column always uses the system base.
+the bound BasePower, which must be declared before the row) for a class with
+no rating pair (ACLineSegment, EnergySource). A `(pu system)` column always
+uses the system base.
 See .development/PERCENT_IMPEDANCE_BASE.md.
 
 set_attr/set_assc are called with network.cim as `part` throughout - the
@@ -139,9 +140,12 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
     if phase_cols:
         connectivity.add_phase_children(network, obj, terminals, **phase_cols)
 
-    # last: their base reads the ratings, BaseVoltage and From* set above
+    # last: their base reads the ratings, BaseVoltage and From* set above. The
+    # system base is a bound BasePower's only, so a system-base value never
+    # depends on CIMG_SYSTEM_MVA_BASE or converts before its BasePower
+    system_base = network.base_power if network.graph.get(getattr(network.cim, 'BasePower', None)) else None
     for attr, qty in relative_qtys:
-        graph_write.set_attr(obj, network.cim, attr, qty, system_base=network.base_power)
+        graph_write.set_attr(obj, network.cim, attr, qty, system_base=system_base)
 
     graph_write.add_to_graph(network, obj)
     return obj

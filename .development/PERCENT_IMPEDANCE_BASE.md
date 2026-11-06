@@ -94,9 +94,13 @@ with an unset rating raises rather than falling back to the system base
 would silently convert on the wrong base).
 
 A class with no rating pair (`ACLineSegment`, `EnergySource`) uses the
-system base: its own `BaseVoltage.nominalVoltage` and cim-graph's
-`network.base_power` (`GraphModel.base_power`, an `ApparentPower` defaulting
-to `CIMG_SYSTEM_MVA_BASE`, else 100 MVA - the PSS/E RAW SBASE equivalent).
+system base: its own `BaseVoltage.nominalVoltage` and the model's
+`BasePower` (PSS/E RAW SBASE, MATPOWER baseMVA), which must be bound before
+the row. cim-graph's `GraphModel.base_power` default (`CIMG_SYSTEM_MVA_BASE`,
+else 100 MVA) is never used by a `.cimtbl` file, so the model depends only on
+the text, and a `BasePower` declared after a system-base row cannot leave it
+on another base (the row raises). Rows on their own rating need no
+`BasePower`.
 The same `z_base` converts r/x/r0/x0 (ohm = pu x z_base) and bch/gch/b0ch/g0ch
 (siemens = pu / z_base), PSS/E RAW's one SBASE for both. `pu` is the
 realistic convention for a line; `percent` is accepted but is a nameplate
@@ -106,8 +110,9 @@ A column can name its base explicitly instead: `x (pu system)` (or
 `(percent system)`) always uses the system base, even on a rated class. This
 is for source data that is already on SBASE, e.g. PSS/E transformer
 impedances on the system MVA base; on a `PowerTransformerEnd` that is its own
-`BaseVoltage` and `network.base_power`. The choice is still made by the
+`BaseVoltage` and the `BasePower`. The choice is still made by the
 table's shape (its header), never by which values are set, and a plain
 `(pu)` keeps the class-shape rule above. `system` is the only base word.
 
-A `BasePower` object in the model does not set `network.base_power` yet.
+A bound `BasePower` sets `network.base_power` (for builders and exporters);
+a second one that disagrees raises.

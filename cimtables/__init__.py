@@ -13,19 +13,19 @@ cim-graph objects out" never needs anything else from this package."""
 import os
 
 from cimgraph.core import get_cim_profile, get_model_authority, get_model_name, set_model_scope
-from cimgraph.models import FeederModel, GraphModel, NodeBreakerModel
+from cimgraph.models import BusBranchModel, FeederModel, GraphModel, NodeBreakerModel
 
-from cimtables import connectivity, graph_write, synthetic, validate
+from cimtables import connectivity, document, graph_write, synthetic, validate
 from cimtables.binder import bind_row
-from cimtables.parser import Header, parse_file, parse_text
+from cimtables.parser import CimtblParseError, Header, parse_file, parse_text
 from cimtables.records import RawRecord
 from cimtables.units import Qty
 from cimtables.validate import CimtblValidationError
 
 __all__ = [
-    'bind_row', 'connectivity', 'graph_write', 'synthetic', 'validate',
+    'bind_row', 'connectivity', 'document', 'graph_write', 'synthetic', 'validate',
     'Header', 'parse_file', 'parse_text', 'RawRecord', 'Qty',
-    'CimtblValidationError', 'load', 'load_text', 'load_model',
+    'CimtblParseError', 'CimtblValidationError', 'load', 'load_text', 'load_model',
 ]
 
 
@@ -54,7 +54,7 @@ def load_text(text: str, network, source_file: str = '<text>'):
     return [bind_row(network, validate.validate(r, profile=header.profile)) for r in records]
 
 
-def load_model(path) -> GraphModel:
+def load_model(path, model_cls: type[GraphModel] | None = None) -> GraphModel:
     """A .cimtbl master file -> a new in-memory GraphModel holding its objects.
 
     The file's Profile= (if any) selects the CIM profile (CIMG_CIM_PROFILE),
@@ -62,15 +62,24 @@ def load_model(path) -> GraphModel:
     database connection, and no container while rows are bound, so no
     EquipmentContainer is set that the file doesn't declare. Its container is
     then the file's one Feeder (a FeederModel), else its one Substation (a
-    NodeBreakerModel), else None (a NodeBreakerModel, e.g. a lone padmount)."""
+    NodeBreakerModel), else None (a NodeBreakerModel, e.g. a lone padmount).
+
+    model_cls=BusBranchModel (PSS/E RAW, MATPOWER) builds that instead, its
+    container the file's one GeographicalRegion, else None."""
+    if model_cls not in (None, BusBranchModel):
+        raise ValueError(f"model_cls must be None (chosen from the file) or BusBranchModel, not {model_cls.__name__}")
     records, header = parse_file(path)
     if header.profile is not None:
         os.environ['CIMG_CIM_PROFILE'] = header.profile
     get_cim_profile.cache_clear()
     _set_model_scope(header)
-    network = NodeBreakerModel(container=None, connection=None, distributed=False)
+    network = (model_cls or NodeBreakerModel)(container=None, connection=None, distributed=False)
     for record in records:
         bind_row(network, validate.validate(record))
+    if model_cls is BusBranchModel:
+        regions = list(network.graph.get(network.cim.GeographicalRegion, {}).values())
+        network.container = regions[0] if len(regions) == 1 else None
+        return network
 
     feeders = list(network.graph.get(network.cim.Feeder, {}).values())
     substations = list(network.graph.get(network.cim.Substation, {}).values())

@@ -9,7 +9,7 @@ os.environ['CIMG_CIM_PROFILE'] = 'cim18v17'
 import pytest
 from cimgraph.core import get_model_authority, get_model_name, set_model_scope
 from cimgraph.databases import XMLFile
-from cimgraph.models import FeederModel, NodeBreakerModel
+from cimgraph.models import BusBranchModel, FeederModel, NodeBreakerModel
 from cimgraph.utils import write_xml
 
 import cimtables
@@ -121,3 +121,27 @@ def test_feeder_model_keeps_the_files_base_power(tmp_path):
     )))
     assert isinstance(network, FeederModel)
     assert network.base_power.to('MVA') == pytest.approx(50)
+
+
+def test_bus_branch_model_from_a_bus_branch_file(tmp_path):
+    network = cimtables.load_model(_write(tmp_path, (
+        'Object BasePower: mRID=sbase, basePower (MVA)=50\n'
+        'Object BaseVoltage: mRID=bv_138, nominalVoltage (kV)=138\n'
+        'Table ACLineSegment: mRID, bus1, bus2, r (pu), x (pu), bch (pu), BaseVoltage\n'
+        '    line_1_2, bus_1, bus_2, 1.938E-2, 5.917E-2, 0.0528, bv_138\n'
+    )), model_cls=BusBranchModel)
+    assert isinstance(network, BusBranchModel)
+    assert network.container is None
+    assert network.base_power.to('MVA') == pytest.approx(50)
+    assert network.find_by_mRID('line_1_2').r.to('ohm') == pytest.approx(1.938e-2 * 138e3 ** 2 / 50e6)
+    assert network.find_by_mRID('line_1_2').Terminals[0].TopologicalNode.mRID == 'bus_1'
+
+
+def test_bus_branch_model_takes_the_one_geographical_region(tmp_path):
+    network = cimtables.load_model(_write(tmp_path, 'Object GeographicalRegion: mRID=region\n'), model_cls=BusBranchModel)
+    assert network.container is network.find_by_mRID('region')
+
+
+def test_other_model_classes_are_rejected(tmp_path):
+    with pytest.raises(ValueError, match='or BusBranchModel, not FeederModel'):
+        cimtables.load_model(_write(tmp_path, 'Object Feeder: mRID=fdr\n'), model_cls=FeederModel)

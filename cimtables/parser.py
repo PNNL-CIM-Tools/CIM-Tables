@@ -15,6 +15,11 @@ _LARK_PARSER = lark.Lark(
 )
 
 
+class CimtblParseError(ValueError):
+    """A .cimtbl syntax error, as `<file>:<line>:<col>: <message>`; <file> is
+    the file the error is in, an imported one included."""
+
+
 def _cell_text(cell_node: lark.Tree) -> str | None:
     """A `cell` node is `value` (one VALUE token, possibly with incidental
     leading/trailing whitespace the grammar doesn't strip), `quoted` (a
@@ -142,20 +147,23 @@ def parse_text(text: str, source_file: str = '<text>') -> tuple[list[RawRecord],
     - `header` holds the file's own Profile/Authority/Model statements.
     Import statements are NOT resolved here (no filesystem access at this
     layer); use parse_file for a real file that may contain them."""
-    tree = _LARK_PARSER.parse(_ensure_trailing_newline(text))
+    try:
+        tree = _LARK_PARSER.parse(_ensure_trailing_newline(text))
+    except lark.exceptions.UnexpectedInput as exc:
+        raise CimtblParseError(f'{source_file}:{exc.line}:{exc.column}: {exc}') from exc
 
     header = Header()
-    statements: list[RawRecord | list[RawRecord] | tuple[str, str]] = []
+    statements: list[lark.Tree | tuple[str, str, int]] = []
     for statement in tree.children:
         node = statement.children[0]
         if node.data in _HEADER_STATEMENTS:
             setting = _HEADER_STATEMENTS[node.data]
             if getattr(header, setting) is not None:
-                raise ValueError(f'{source_file}:{node.meta.line}: {node.children[0]} is declared twice')
+                raise CimtblParseError(f'{source_file}:{node.meta.line}: {node.children[0]} is declared twice')
             header = replace(header, **{setting: str(node.children[1]).strip()})
             continue
         if node.data == 'import_stmt':
-            statements.append(('__import__', str(node.children[1])))
+            statements.append(('__import__', str(node.children[1]), node.meta.line))
             continue
         statements.append(node)
 
@@ -165,7 +173,7 @@ def parse_text(text: str, source_file: str = '<text>') -> tuple[list[RawRecord],
         if isinstance(item, tuple):
             records.append(RawRecord(
                 form='Table', cim_class='__import__', fields={'path': item[1]}, units={},
-                source_file=source_file, source_line=0,
+                source_file=source_file, source_line=item[2],
             ))
         else:
             built = builder.transform(item)
@@ -212,6 +220,8 @@ def parse_file(path: str | Path) -> tuple[list[RawRecord], Header]:
     for record in raw_records:
         if record.cim_class == '__import__':
             import_path = path.parent / record.fields['path']
+            if not import_path.is_file():
+                raise CimtblParseError(f"{path}:{record.source_line}: Import {record.fields['path']!r}: {import_path} not found")
             imported_records, imported_header = parse_file(import_path)
             records.extend(imported_records)
             header = _merge_header(path, header, import_path, imported_header)

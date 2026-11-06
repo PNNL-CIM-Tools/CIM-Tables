@@ -56,7 +56,8 @@ def z_base(obj: object, system_base: CIMUnit | Qty | float | None, *, on_system_
     if nominal_voltage is None or system_base is None:
         raise ValueError(
             f"{type(obj).__name__} {getattr(obj, 'mRID', obj)!r}: a pu/percent impedance needs "
-            f"a rated From* reference, or {voltage_source} and a system_base power"
+            f"a rated From* reference, or {voltage_source} and a system_base power "
+            f"(in .cimtbl: a BasePower declared before this row)"
         )
     if isinstance(system_base, Qty):
         base_va = ureg.Quantity(system_base.value, system_base.unit).to('VA').magnitude

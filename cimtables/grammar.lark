@@ -41,12 +41,14 @@ cell: VALUE -> value
     | QUOTED -> quoted
     | -> blank
 
-PROFILE.3: "Profile"
-AUTHORITY.3: "Authority"
-MODEL.3: "Model"
-IMPORT.3: "Import"
-OBJECT.3: "Object"
-TABLE.3: "Table"
+// A keyword only where its statement's shape follows, so a row whose first
+// cell merely starts with one (Object_1, Profiles, Table 3) is a value
+PROFILE.3: /Profile(?=[ \t]*=)/
+AUTHORITY.3: /Authority(?=[ \t]*=)/
+MODEL.3: /Model(?=[ \t]*=)/
+IMPORT.3: /Import(?=[ \t]+[^\s#])/
+OBJECT.3: /Object(?=[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*:)/
+TABLE.3: /Table(?=[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*:)/
 NAME.2: /[A-Za-z_][A-Za-z0-9_]*/
 VALUE: /[^,()\s#"][^,()\n#]*/   // never starts with whitespace, so an indented comment line is not a blank cell
 QUOTED: /"([^"\n]|"")*"/       // CSV-style: , # ( ) are literal inside, "" is one embedded quote

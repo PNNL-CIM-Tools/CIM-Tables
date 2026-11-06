@@ -256,13 +256,36 @@ def test_same_class_two_header_shapes():
 
 
 def test_malformed_object_missing_colon_raises():
-    with pytest.raises(lark.exceptions.UnexpectedInput):
+    with pytest.raises(parser.CimtblParseError, match=r'^<test>:1:\d+: '):
         _parse('Object BaseFrequency name=x, frequency=60\n')
 
 
 def test_malformed_unterminated_unit_raises():
-    with pytest.raises(lark.exceptions.UnexpectedInput):
+    with pytest.raises(parser.CimtblParseError):
         _parse('Table BaseVoltage: name, nominalVoltage (V\n    base_115, 115000\n')
+
+
+def test_parse_error_in_an_import_names_the_imported_file(tmp_path):
+    # CIMHub's IEEE13_CYME: an empty header cell in the imported part
+    (tmp_path / 'transformers.cimtbl').write_text(
+        'Profile = cim18v17\n'
+        'Table PowerTransformerEnd: mRID, ratedS (kVA), , x\n'
+    )
+    (tmp_path / 'master.cimtbl').write_text('Profile = cim18v17\nImport transformers.cimtbl\n')
+    with pytest.raises(parser.CimtblParseError, match=r'transformers\.cimtbl:2:\d+: '):
+        parser.parse_file(tmp_path / 'master.cimtbl')
+
+
+def test_missing_import_names_the_importing_line(tmp_path):
+    (tmp_path / 'master.cimtbl').write_text('Profile = cim18v17\n\nImport parts.cimtbl\n')
+    with pytest.raises(parser.CimtblParseError, match=r"master\.cimtbl:3: Import 'parts.cimtbl'"):
+        parser.parse_file(tmp_path / 'master.cimtbl')
+
+
+@pytest.mark.parametrize('first_cell', ['Object_1', 'Objects', 'Profiles', 'Model', 'Tablet', 'Import'])
+def test_a_row_cell_starting_with_a_keyword_is_a_value(first_cell):
+    records, _ = _parse(f'Table IdentifiedObject: mRID, name\n    {first_cell}, Table 3\n')
+    assert records[0].fields == {'mRID': first_cell, 'name': 'Table 3'}
 
 
 # --- import splicing ---------------------------------------------------

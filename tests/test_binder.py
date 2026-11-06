@@ -175,12 +175,13 @@ def test_percent_impedance_on_unrated_end_raises_instead_of_system_base(network)
 
 
 _PU_LINE = 'Object BaseVoltage: mRID=bv_115kv, nominalVoltage (kV)=115\n'
+_SYSTEM_BASE = _PU_LINE + 'Object BasePower: mRID=sbase, basePower (MVA)=100\n'
 
 
 def test_pu_impedance_on_system_base_when_no_rating_pair(network):
-    # ACLineSegment has no rating pair: network.base_power (default 100 MVA)
-    # and the line's own BaseVoltage
-    _bind_text(network, _PU_LINE + (
+    # ACLineSegment has no rating pair: the bound BasePower and the line's own
+    # BaseVoltage
+    _bind_text(network, _SYSTEM_BASE + (
         'Object ACLineSegment: mRID=line_1, BaseVoltage=bv_115kv, '
         'r (pu)=0.01938, x (pu)=0.05917, bch (pu)=0.0528\n'
     ))
@@ -191,13 +192,33 @@ def test_pu_impedance_on_system_base_when_no_rating_pair(network):
     assert line.bch.to('S') == pytest.approx(0.0528 / z_base)
 
 
-def test_pu_impedance_uses_network_base_power(network):
+def test_pu_on_system_base_without_a_base_power_raises(network):
+    # the model is a function of the text alone: neither CIMG_SYSTEM_MVA_BASE
+    # nor a base_power set on the network stands in for a BasePower row
     network.base_power = cim.ApparentPower(10, 'MVA')
+    with pytest.raises(ValueError, match=r"'line_1'.*a BasePower declared before this row"):
+        _bind_text(network, _PU_LINE + (
+            'Object ACLineSegment: mRID=line_1, BaseVoltage=bv_115kv, r (pu)=0.01938\n'
+        ))
+
+
+def test_base_power_after_a_system_base_row_raises(network):
+    # CIMHub R2: the end would bind on 100 MVA and the model then report 50
+    with pytest.raises(ValueError, match=r"'xf_1_2_end1'.*a BasePower declared before this row"):
+        _bind_text(network, _PU_LINE + (
+            'Object PowerTransformer: mRID=xf_1_2\n'
+            'Table PowerTransformerEnd: mRID, endNumber, BaseVoltage, ratedU (kV), ratedS (MVA), x (pu system), PowerTransformer\n'
+            '    xf_1_2_end1, 1, bv_115kv, 115, 50, 0.045, xf_1_2\n'
+            'Object BasePower: mRID=sbase, basePower (MVA)=50\n'
+        ))
+
+
+def test_pu_on_own_rating_needs_no_base_power(network):
     _bind_text(network, _PU_LINE + (
-        'Object ACLineSegment: mRID=line_1, BaseVoltage=bv_115kv, r (pu)=0.01938\n'
+        'Object PowerTransformerEnd: mRID=end_1, BaseVoltage=bv_115kv, ratedU (kV)=115, ratedS (MVA)=50, x (pu)=0.1\n'
     ))
-    line = graph_write.resolve(network, cim.ACLineSegment, 'line_1')
-    assert line.r.to('ohm') == pytest.approx(0.01938 * 115000 ** 2 / 10e6)
+    end = graph_write.resolve(network, cim.PowerTransformerEnd, 'end_1')
+    assert end.x.to('ohm') == pytest.approx(0.1 * 115000 ** 2 / 50e6)
 
 
 def test_pu_impedance_without_base_voltage_raises(network):
@@ -205,14 +226,11 @@ def test_pu_impedance_without_base_voltage_raises(network):
         _bind_text(network, 'Object ACLineSegment: mRID=line_1, r (pu)=0.01938\n')
 
 
-
-
-
 def test_pu_system_column_puts_a_rated_end_on_the_system_base(network):
     # PSS/E SBASE impedances: (pu system) skips the end's own ratedU/ratedS
-    # for its BaseVoltage and network.base_power; a plain (percent) column on
-    # the same row still uses the rating pair
-    _bind_text(network, _PU_LINE + (
+    # for its BaseVoltage and the BasePower; a plain (percent) column on the
+    # same row still uses the rating pair
+    _bind_text(network, _SYSTEM_BASE + (
         'Object PowerTransformerEnd: mRID=end_1, BaseVoltage=bv_115kv, ratedU (kV)=115, ratedS (MVA)=50, '
         'x (pu system)=0.1, r (percent)=1.1\n'
     ))
