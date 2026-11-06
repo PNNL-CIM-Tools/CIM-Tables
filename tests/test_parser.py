@@ -433,3 +433,8 @@ def test_quoted_empty_string_is_not_unset():
 def test_quoted_header_default():
     records, _ = _parse('Table WireInfo: mRID, name="DEFAULT (DC)"\n    w1\n')
     assert records[0].fields == {'mRID': 'w1', 'name': 'DEFAULT (DC)'}
+
+
+def test_row_with_more_cells_than_columns_raises():
+    with pytest.raises(parser.CimtblParseError, match=r'<test>:3: 3 cells, but Table BaseVoltage has 2 columns'):
+        _parse('Table BaseVoltage: mRID, nominalVoltage (kV)\n    bv_1, 4.16\n    bv_2, 4.16, 12.47\n')

@@ -19,6 +19,7 @@ where validate.py has already decided which columns a row may carry.
 """
 
 import dataclasses
+import functools
 import math
 import typing
 from types import ModuleType
@@ -31,6 +32,11 @@ from cimtables import impedance
 from cimtables.units import Qty
 
 T = TypeVar("T")
+
+# A CIM class's resolved annotations, once per class: re-resolving them on
+# every row was 75% of bind time (CIMHub G7). Classes never change once
+# imported, so the cache never goes stale; callers must not mutate the dict.
+type_hints = functools.cache(typing.get_type_hints)
 
 
 def _part_field(part: ModuleType, obj: object, attr: str) -> dataclasses.Field:
@@ -81,8 +87,10 @@ def set_attr(
       target's, else its BaseVoltage and `system_base`, the system base power,
       e.g. network.base_power), or always the system base for a Qty with
       base='system'. So the object's ratings, BaseVoltage and From*
-      references must be set first. Relative Qtys on other attributes
-      (PerCent) are converted like any other unit.
+      references must be set first.
+    - on a PerCent attribute (percentImpedance, pfixedPct, ...) a unitless
+      or 'percent' Qty is stored as the percent number (5 % -> PerCent(5.0));
+      any other unit raises.
     - anything else must be an instance of a declared type (str, int, UUID,
       an Enum, ...)
     Raises TypeError on a mismatch.
@@ -100,7 +108,7 @@ def set_attr(
     if attribute_value is None:
         return
 
-    hint = typing.get_type_hints(type(source_object))[attribute_name]
+    hint = type_hints(type(source_object))[attribute_name]
     declared = [
         t
         for t in typing.get_args(hint) or (hint,)
@@ -115,7 +123,13 @@ def set_attr(
                 f"{where} is not a CIMUnit-typed attribute, but got a Qty ({attribute_value!r})"
             )
         unit_name = cim_unit_type(0).unit.name
-        if attribute_value.is_relative() and unit_name in ("ohm", "S"):
+        if cim_unit_type.__name__ == "PerCent":
+            # PerCent holds the percent number itself (5 % -> 5.0, written as
+            # 5 in CIM XML); pint would scale 'percent' to the fraction 0.05
+            if attribute_value.unit not in (None, "", "percent") or attribute_value.base is not None:
+                raise ValueError(f"{where} is a PerCent: give it unitless or (percent), not {attribute_value!r}")
+            attribute_value = cim_unit_type(attribute_value.value)
+        elif attribute_value.is_relative() and unit_name in ("ohm", "S"):
             z_base = impedance.z_base(source_object, system_base, on_system_base=attribute_value.base == 'system')
             per_unit = attribute_value.value / 100 if attribute_value.unit == "percent" else attribute_value.value
             si_value = per_unit * z_base if unit_name == "ohm" else per_unit / z_base
@@ -143,12 +157,61 @@ def set_attr(
     setattr(source_object, attribute_name, attribute_value)
 
 
-def _set_side(obj: object, attr: str, field: dataclasses.Field, target: object) -> None:
+def get_qty(
+    source_object: object,
+    attribute_name: str,
+    unit: str,
+    *,
+    base: str | None = None,
+    system_base: CIMUnit | Qty | float | None = None,
+) -> float | None:
+    """The read-side mirror of set_attr: a CIMUnit attribute's value in
+    `unit` ('kV', 'ohm/mile', 'MVAr'), or None if it is unset.
+
+    'pu'/'percent' on an ohm- or siemens-typed attribute is set_attr's
+    conversion inverted, through the same impedance.z_base (the object's
+    rating, a From* target's, else its BaseVoltage and `system_base`);
+    base='system' forces the system base, as `(pu system)` does. On a PerCent
+    attribute 'percent' (or '') returns the stored percent number. Any other
+    unit converts through pint. Raises ValueError for a name that is not a
+    field, an association, a non-CIMUnit attribute, a base on a non-relative
+    unit, or a missing rating/BaseVoltage/system_base; pint raises on a
+    dimension mismatch."""
+    where = f"{type(source_object).__name__}.{attribute_name}"
+    field = getattr(source_object, "__dataclass_fields__", {}).get(attribute_name)
+    if field is None:
+        raise ValueError(f"{attribute_name!r} is not a field of {type(source_object).__name__}")
+    if field.metadata.get("inverse") is not None:
+        raise ValueError(f"{where} is an association, not a quantity")
+    if base not in (None, "system") or (base is not None and unit not in ("pu", "percent")):
+        raise ValueError(f"{where}: only pu/percent take a base, and only 'system' (got {unit!r}, base={base!r})")
+
+    value = getattr(source_object, attribute_name)
+    if value is None:
+        return None
+    if not isinstance(value, CIMUnit):
+        raise ValueError(f"{where} is not a CIMUnit-typed attribute (holds {value!r})")
+
+    unit_name = value.unit.name
+    if type(value).__name__ == "PerCent":
+        if unit not in ("", "percent") or base is not None:
+            raise ValueError(f"{where} is a PerCent: read it as 'percent', not {unit!r}")
+        return value.value
+    if unit in ("pu", "percent") and unit_name in ("ohm", "S"):
+        z_base = impedance.z_base(source_object, system_base, on_system_base=base == "system")
+        si_value = value.to(unit_name)
+        per_unit = si_value / z_base if unit_name == "ohm" else si_value * z_base
+        return per_unit * 100 if unit == "percent" else per_unit
+    return value.to(unit)
+
+
+def _set_side(obj: object, attr: str, field: dataclasses.Field, target: object, *, known_new: bool = False) -> None:
     """One side of an association write - list-append (dedup by identity,
-    matching cimgraph's own create_edge) or singular overwrite, per field.type."""
+    matching cimgraph's own create_edge, unless the caller knows target is
+    not on the list yet) or singular overwrite, per field.type."""
     if "list" in field.type:
         obj_list = getattr(obj, attr)
-        if not any(x is target for x in obj_list):
+        if known_new or not any(x is target for x in obj_list):
             obj_list.append(target)
     else:
         setattr(obj, attr, target)
@@ -174,9 +237,13 @@ def set_assc(obj: object, part: ModuleType, assc: str, target: object) -> object
     reverse_cls_name, reverse_attr = inverse.split(".")
     reverse_field = getattr(part, reverse_cls_name).__dataclass_fields__[reverse_attr]
 
+    # A singular side that did not already point at target means obj is not
+    # on target's reverse list yet, so skip its O(n) dedup scan: those lists
+    # (BaseVoltage.ConductingEquipment, Feeder.Equipments) grow with the model
+    reverse_known_new = "list" not in field.type and getattr(obj, assc) is not target
     _set_side(obj, assc, field, target)
     if target is not None:
-        _set_side(target, reverse_attr, reverse_field, obj)
+        _set_side(target, reverse_attr, reverse_field, obj, known_new=reverse_known_new)
     return target
 
 

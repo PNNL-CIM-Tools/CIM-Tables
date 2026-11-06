@@ -67,8 +67,17 @@ def _new_object(cim_cls: type, row: object) -> object:
     return obj
 
 
-def bind_row(network: GraphModel, row: object, *, obj: object = None, container: object = None) -> object:
+def bind_row(network: GraphModel, row: object, *, obj: object = None, container: object = None,
+             update: bool = False) -> object:
     """Validated <Class>Row -> live cim-graph object, added to network.
+
+    update=True is an `Update` row (CIM's additive definition, a Description
+    class in a profile; Object/Table rows are the formative one): its mRID
+    names an object already bound, in this class or a subclass, and its
+    columns add attributes and references to it, the inverse sides included.
+    It only adds: a single-valued field that is already set raises, as do
+    connectivity/phase columns (they would make a second set of Terminals).
+    No EquipmentContainer is defaulted onto it.
 
     `obj` lets a caller (ObjectBuilder.from_table) supply an already-created
     object instead of this function constructing one with cim_cls(mRID=...) -
@@ -82,20 +91,25 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
     A ValueError/TypeError binding a row read from a file (row.source_file
     set) is re-raised as CimtblBindError, prefixed with the row's file:line."""
     try:
-        return _bind_row(network, row, obj, container)
+        return _bind_row(network, row, obj, container, update)
     except (ValueError, TypeError) as exc:
         if not row.source_file:  # a hand-built row has no location to add
             raise
         raise CimtblBindError(f'{row.source_file}:{row.source_line}: {exc}') from exc
 
 
-def _bind_row(network: GraphModel, row: object, obj: object, container: object) -> object:
+def _bind_row(network: GraphModel, row: object, obj: object, container: object, update: bool) -> object:
     """bind_row without the error location."""
     row_cls_name = type(row).__name__
     ref_slots = validate.reference_slots(row_cls_name)
+    cim_cls = getattr(network.cim, row_cls_name.removesuffix('Row'))
 
-    if obj is None:
-        obj = _new_object(getattr(network.cim, row_cls_name.removesuffix('Row')), row)
+    if update:
+        obj = graph_write.resolve(network, cim_cls, row.mRID) if row.mRID is not None else None
+        if obj is None:
+            raise ValueError(f"Update {cim_cls.__name__} {row.mRID!r}: no such object (an Update adds to an object defined earlier)")
+    elif obj is None:
+        obj = _new_object(cim_cls, row)
 
     node_cols: dict[str, str] = {}
     bus_cols: dict[str, str] = {}
@@ -109,6 +123,10 @@ def _bind_row(network: GraphModel, row: object, obj: object, container: object) 
         value = getattr(row, f.name)
         if value is None:
             continue
+        if update and f.name not in obj.__dataclass_fields__:
+            raise ValueError(f"Update {row.mRID!r}: {f.name!r} is connectivity shorthand; set it where the object is defined")
+        if update and getattr(obj, f.name) is not None and not isinstance(getattr(obj, f.name), list):
+            raise ValueError(f"Update {row.mRID!r}: {f.name} is already set ({getattr(obj, f.name)!r}); an Update only adds")
 
         if f.name in synthetic.CONNECTIVITY_COLUMNS and f.name not in obj.__dataclass_fields__:
             if synthetic.CONNECTIVITY_COLUMNS[f.name][0] == 'TopologicalNode':
@@ -149,6 +167,9 @@ def _bind_row(network: GraphModel, row: object, obj: object, container: object) 
         terminals = connectivity.add_connectivity(
             network, obj, node_cols=node_cols, bus_cols=bus_cols, equipment_container=container
         )
+    elif has_container_slot and update:
+        if container is not None:
+            graph_write.set_assc(obj, network.cim, _CONTAINER_FIELD, container)
     elif has_container_slot:
         resolved_container = container if container is not None else network.container
         if isinstance(resolved_container, network.cim.EquipmentContainer):
@@ -164,6 +185,7 @@ def _bind_row(network: GraphModel, row: object, obj: object, container: object) 
     for attr, qty in relative_qtys:
         graph_write.set_attr(obj, network.cim, attr, qty, system_base=system_base)
 
-    graph_write.add_to_graph(network, obj)
+    if not update:
+        graph_write.add_to_graph(network, obj)
     return obj
 

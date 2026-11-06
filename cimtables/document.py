@@ -11,7 +11,7 @@ after its comma to the column's widest cell, so columns line up. Every row
 writes every cell (a trailing None is a trailing empty cell).
 
 Quoting: a cell is quoted iff it contains `,` `(` `)` `#` `"`, starts or ends
-with whitespace, is the empty string, or starts like a statement (`Table X:`,
+with whitespace, is the empty string, or starts like a statement (`Table X:`, `Update X:`,
 `Profile =`, `Import `), which the parser would otherwise read as one. Inner
 `"` are doubled. None is a blank cell (unset); a newline in a cell raises.
 """
@@ -23,7 +23,7 @@ from typing import NamedTuple
 
 _ROW_INDENT = '    '
 _NEEDS_QUOTES = re.compile(r'[,()#"]|^\s|\s$|^$')
-_STATEMENT_START = re.compile(r'(Profile|Authority|Model)[ \t]*=|Import[ \t]|(Object|Table)[ \t]+[A-Za-z_]\w*[ \t]*:')
+_STATEMENT_START = re.compile(r'(Profile|Authority|Model)[ \t]*=|Import[ \t]|(Object|Table|Update([ \t]+Table)?)[ \t]+[A-Za-z_]\w*[ \t]*:')
 
 
 class Column(NamedTuple):
@@ -52,6 +52,7 @@ class Table:
     columns: list[Column]
     rows: list[Row]
     comment: str | None = None
+    update: bool = False  # an additive `Update Table <Class>:` statement
 
 
 @dataclass
@@ -60,6 +61,7 @@ class ObjectStatement:
     cim_class: str
     cells: list[tuple[Column, str | None]]
     comment: str | None = None
+    update: bool = False  # an additive `Update <Class>:` statement
 
 
 @dataclass
@@ -117,14 +119,15 @@ def format_document(document: Document) -> str:
                 f"{column.name}{f' ({column.unit})' if column.unit else ''}={_cell(value)}"
                 for column, value in statement.cells
             ]
-            blocks.append(lines + [f"Object {statement.cim_class}: {', '.join(assignments)}"])
+            keyword = 'Update' if statement.update else 'Object'
+            blocks.append(lines + [f"{keyword} {statement.cim_class}: {', '.join(assignments)}"])
             continue
 
         header = []
         for column in statement.columns:
             text = column.name + (f' ({column.unit})' if column.unit else '')
             header.append(text if column.default is None else f'{text}={_cell(column.default)}')
-        lines.append(f"Table {statement.cim_class}: {', '.join(header)}")
+        lines.append(f"{'Update Table' if statement.update else 'Table'} {statement.cim_class}: {', '.join(header)}")
 
         required = sum(column.default is None for column in statement.columns)
         rows = [[_cell(text) for text in row.cells] for row in statement.rows]
@@ -151,12 +154,16 @@ def format_document(document: Document) -> str:
 def write_documents(documents: DocumentSet, directory) -> Path:
     """Write the master and every part as `<name>.cimtbl` into directory
     (created if missing); returns the master's path. Nothing is written if
-    a name repeats, an Import names a document not in the set, a part is
+    a name ends in .cimtbl (names are stems), a name repeats, an Import names
+    a document not in the set, a part is
     never imported, or directory already holds a .cimtbl file not in the set
     (a stale part from an earlier run would sit there unimported)."""
     directory = Path(directory)
     all_documents = [documents.master, *documents.parts]
     names = [document.name for document in all_documents]
+    suffixed = [name for name in names if name.endswith('.cimtbl')]
+    if suffixed:
+        raise ValueError(f'document names are stems, without .cimtbl: {suffixed}')
     if len(set(names)) != len(names):
         raise ValueError(f'document names repeat: {sorted(n for n in set(names) if names.count(n) > 1)}')
 
@@ -166,7 +173,8 @@ def write_documents(documents: DocumentSet, directory) -> Path:
             if not isinstance(statement, Import):
                 continue
             if statement.name not in names:
-                raise ValueError(f'{document.name} imports {statement.name!r}, which is not in the document set')
+                raise ValueError(f'{document.name} imports {statement.name!r}, which is not in the document set '
+                                 f'(Import names are stems, without .cimtbl)')
             imported.add(statement.name)
     never_imported = [part.name for part in documents.parts if part.name not in imported]
     if never_imported:

@@ -41,12 +41,23 @@ Earlier cim18v17 descriptions (before the 2026-10-26 regeneration) gave `ratedU`
 The `TransformerWinding` descriptions were swapped. They are corrected in the
 regenerated cim18v17 profile:
 
-| attribute | meaning | 1φ 250 kVA 12470GrdY/7200 – 120/240 |
-|---|---|---|
-| `ratedU` | phase-to-phase nameplate designation (IEEE C57.12.00-2021 Table 7), same as `PowerTransformerEnd.ratedU` | 12470 / 240 / 240 |
-| `ratedS` | the winding's own normal rating | 250 / 125 / 125 |
-| `baseU` | voltage across the winding's own terminals (IEV 421-04-01) | 7200 / 120 / 120 |
-| `baseS` | common percent-impedance base for the tank (already described as "used for calculation of percent impedance") | 250 / 250 / 250 |
+The classes are filled from the nameplate, as asset management records it
+(user decision 2026-11-06, which closes CIMHub R13):
+
+| attribute | meaning | 1φ 250 kVA 12470GrdY/7200 – 120/240 | 3φ 1000 kVA 4160Y/2400 – 480 (delta LV) |
+|---|---|---|---|
+| `ratedU` | nameplate field 1: the phase-to-phase designation (IEEE C57.12.00-2021 Table 7), same as `PowerTransformerEnd.ratedU` | 12470 / 240 / 240 | 4160 / 480 |
+| `ratedS` | the winding's own nameplate rating | 250 / 125 / 125 | 1000 / 1000 |
+| `baseU` | nameplate field 2: the voltage across the coil (IEV 421-04-01): phase-to-neutral for wye, phase-to-phase for delta | 7200 / 120 / 120 | 2400 / 480 |
+| `baseS` | the per-coil kVA the percent impedance is on: `ratedS` for a 1φ primary, `2 · ratedS` for each triplex half (the primary's kVA), `ratedS / 3` for a 3φ coil | 250 / 250 / 250 | 333.3 / 333.3 |
+
+So the phase count lives in the data (`baseS`), not in `z_base`, which stays
+`baseU² / baseS` for every connection. The ohms are the coil's own: a wye
+coil gives the 3φ base (2400² / 333.3 kVA = 17.28 Ω ≈ 4160² / 1000 kVA, the
+gap is the nameplate's rounding of 4160/√3), and a delta coil gives its
+branch impedance, 3× the wye equivalent (480² / 333.3 kVA). Nothing infers
+the count: one balanced winding, per-phase coils and PhaseEnds all work the
+same way.
 
 With these definitions, `baseU`/`baseS` form a coherent per-unit base, and
 `baseU²/baseS` is exactly OpenDSS / CIMHub's

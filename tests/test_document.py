@@ -201,3 +201,14 @@ def test_write_documents_writes_utf8_with_lf_line_endings(tmp_path):
     path = write_documents(DocumentSet(master, []), tmp_path)
     assert path.read_bytes() == format_document(master).encode('utf-8')
     assert b'\r' not in path.read_bytes()
+
+
+def test_write_documents_rejects_a_cimtbl_suffix(tmp_path):
+    master, part = _master_and_part()
+    part.name = 'voltages.cimtbl'
+    with pytest.raises(ValueError, match=r"stems, without .cimtbl: \['voltages.cimtbl'\]"):
+        write_documents(DocumentSet(master, [part]), tmp_path)
+    master, part = _master_and_part()
+    master.statements[0] = Import('voltages.cimtbl')
+    with pytest.raises(ValueError, match="imports 'voltages.cimtbl'.*stems"):
+        write_documents(DocumentSet(master, [part]), tmp_path)

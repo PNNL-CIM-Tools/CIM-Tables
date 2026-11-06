@@ -18,10 +18,10 @@ def _parent_assoc_field(phase_cls: type, parent: object) -> str:
     """The field on phase_cls whose type is the parent's class (or a base of
     it) - not always type(parent).__name__ (e.g. LinearShuntCompensatorPhase's
     field is 'ShuntCompensator', the base class name, not
-    'LinearShuntCompensator'). Same typing.get_type_hints resolution
+    'LinearShuntCompensator'). Same type-hint resolution
     graph_write._cim_unit_type uses for CIMUnit, applied to find the
     parent-association field instead."""
-    hints = typing.get_type_hints(phase_cls)
+    hints = graph_write.type_hints(phase_cls)
     for field_name, hint in hints.items():
         for arg in typing.get_args(hint) or (hint,):
             if isinstance(arg, type) and isinstance(parent, arg):
@@ -205,7 +205,7 @@ def add_phase_children(network: GraphModel, obj: CN.ConductingEquipment, termina
 
     phase_cls = _phase_cls(network, obj)
     parent_field = _parent_assoc_field(phase_cls, obj)
-    child_hints = typing.get_type_hints(phase_cls)
+    child_hints = graph_write.type_hints(phase_cls)
     has_sequence_number = 'sequenceNumber' in child_hints
     has_sides = 'phaseSide1' in child_hints
     if tokens != side2_tokens and not has_sides:

@@ -16,6 +16,7 @@ from cimgraph.models import BusBranchModel, FeederModel, GraphModel, NodeBreaker
 
 from cimtables import connectivity, document, graph_write, synthetic, validate
 from cimtables.binder import CimtblBindError, bind_row
+from cimtables.diff import diff_models
 from cimtables.parser import CimtblParseError, Header, parse_file, parse_text
 from cimtables.records import RawRecord
 from cimtables.units import Qty
@@ -24,7 +25,7 @@ from cimtables.validate import CimtblValidationError
 __all__ = [
     'bind_row', 'connectivity', 'document', 'graph_write', 'synthetic', 'validate',
     'Header', 'parse_file', 'parse_text', 'RawRecord', 'Qty',
-    'CimtblParseError', 'CimtblValidationError', 'CimtblBindError', 'load', 'load_text', 'load_model',
+    'CimtblParseError', 'CimtblValidationError', 'CimtblBindError', 'diff_models', 'load', 'load_text', 'load_model',
 ]
 
 
@@ -72,7 +73,7 @@ def load_model(path, model_cls: type[GraphModel] | None = None) -> GraphModel:
     _set_model_scope(header)
     network = (model_cls or NodeBreakerModel)(container=None, connection=None, distributed=False)
     for record in records:
-        bind_row(network, validate.validate(record))
+        bind_row(network, validate.validate(record), update=record.form == 'Update')
     if model_cls is BusBranchModel:
         regions = list(network.graph.get(network.cim.GeographicalRegion, {}).values())
         network.container = regions[0] if len(regions) == 1 else None
@@ -96,7 +97,7 @@ def _bind_records(network, records: list[RawRecord], header: Header, source: str
             f"{source}: Profile = {header.profile}, but the network's profile is {network.cim.__name__}"
         )
     _set_model_scope(header)
-    return [bind_row(network, validate.validate(r, profile=header.profile)) for r in records]
+    return [bind_row(network, validate.validate(r, profile=header.profile), update=r.form == 'Update') for r in records]
 
 
 def _set_model_scope(header: Header) -> None:

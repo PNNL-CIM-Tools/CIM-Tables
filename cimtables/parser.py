@@ -118,6 +118,11 @@ class _RecordBuilder(lark.Transformer):
         records: list[RawRecord] = []
         for row in table_rows:
             cell_nodes = row.children
+            if len(cell_nodes) > len(columns):
+                raise CimtblParseError(
+                    f'{self.source_file}:{row.meta.line}: {len(cell_nodes)} cells, but Table {cim_class} '
+                    f'has {len(columns)} columns'
+                )
             row_values = {
                 col: _cell_text(cell_nodes[i])
                 for i, col in enumerate(row_columns) if i < len(cell_nodes)
@@ -137,6 +142,14 @@ class _RecordBuilder(lark.Transformer):
                 source_file=self.source_file, source_line=row.meta.line,
             ))
         return records
+
+    def update_object_stmt(self, children: list) -> RawRecord:
+        return replace(self.object_stmt(children), form='Update')
+
+    def update_table_stmt(self, children: list) -> list[RawRecord]:
+        update_token, table_token, *rest = children
+        return [replace(record, form='Update') for record in self.table_stmt([update_token, *rest])]
+
 
 def _ensure_trailing_newline(text: str) -> str:
     return text if text.endswith('\n') else text + '\n'
@@ -176,7 +189,10 @@ def parse_text(text: str, source_file: str = '<text>') -> tuple[list[RawRecord],
                 source_file=source_file, source_line=item[2],
             ))
         else:
-            built = builder.transform(item)
+            try:
+                built = builder.transform(item)
+            except lark.exceptions.VisitError as exc:  # lark wraps what a transformer method raises
+                raise exc.orig_exc from None
             if isinstance(built, list):
                 records.extend(built)
             else:

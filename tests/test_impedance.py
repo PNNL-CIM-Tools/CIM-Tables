@@ -71,3 +71,18 @@ def test_system_base_flag_skips_the_rating_pair():
     bv = cim.BaseVoltage(mRID='bv', nominalVoltage=cim.Voltage(115, 'kV'))
     end = cim.PowerTransformerEnd(mRID='end', BaseVoltage=bv, ratedU=cim.Voltage(115, 'kV'))
     assert impedance.z_base(end, _SYSTEM, on_system_base=True) == pytest.approx(115e3 ** 2 / 100e6)
+
+
+@pytest.mark.parametrize('coil_voltage, coil_kva, ohms', [
+    (2400, 1000 / 3, 2400 ** 2 / (1000e3 / 3)),  # 3-phase wye HV coil: 4160Y/2400, baseS = ratedS / 3
+    (4160, 1000 / 3, 4160 ** 2 / (1000e3 / 3)),  # 3-phase delta coil: the branch's own ohms, 3x the wye equivalent
+    (120, 2 * 125, 120 ** 2 / 250e3),            # triplex half (125 kVA): baseS = 2 * ratedS, the primary's kVA
+])
+def test_nameplate_convention_puts_the_phase_count_in_base_s(coil_voltage, coil_kva, ohms):
+    # ratedU/ratedS are the nameplate (4160, 1000 kVA); baseU is the coil
+    # voltage and baseS the per-coil kVA, so z_base needs no phase count
+    winding = cim.TransformerWinding(mRID='wdg', ratedU=cim.Voltage(4160), ratedS=cim.ApparentPower(1000, 'kVA'),
+                                     baseU=cim.Voltage(coil_voltage), baseS=cim.ApparentPower(coil_kva, 'kVA'))
+    assert impedance.z_base(winding, _SYSTEM) == pytest.approx(ohms)
+    assert impedance.z_base(winding, _SYSTEM) == pytest.approx(
+        {2400: 4160 ** 2 / 1000e3, 4160: 3 * 4160 ** 2 / 1000e3, 120: 120 ** 2 / 250e3}[coil_voltage], rel=2e-3)

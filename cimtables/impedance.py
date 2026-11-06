@@ -17,7 +17,8 @@ def z_base(obj: object, system_base: CIMUnit | Qty | float | None, *, on_system_
        (TransformerMeshImpedance's FromWinding/FromTransformerEnd: CIM's "the
        'from' end ... determines the voltage reference"), if that class is
        rated: baseU/baseS where the class has them (TransformerWinding: coil
-       voltage, common tank kVA), else ratedU/ratedS (PowerTransformerEnd).
+       voltage and per-coil kVA, e.g. ratedS/3 on a 3-phase coil, so no phase
+       count is needed here), else ratedU/ratedS (PowerTransformerEnd).
        Both must be set.
     2. else the system base (ACLineSegment, EnergySource): obj's own
        BaseVoltage.nominalVoltage, or nomU where the class has it

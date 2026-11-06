@@ -23,6 +23,7 @@ string with _coerce.
 
 import dataclasses
 import difflib
+import functools
 import importlib
 import os
 import typing
@@ -34,7 +35,7 @@ from cimprofiles import profile_module
 from cimprofiles.units.units import CIMUnit
 
 from cimtables.units import Qty
-from cimtables import records, synthetic
+from cimtables import graph_write, records, synthetic
 
 _row_dataclasses: dict[tuple[str, str], type] = {}
 _SKIP_FIELDS = {'mRID', 'identifier'}
@@ -99,12 +100,14 @@ def _classify(hint: Any) -> tuple[str, type]:
     return _FieldKind.SCALAR, (real_args[0] if real_args else str)
 
 
+@functools.cache
 def _real_fields(cim_cls: type) -> dict[str, tuple[str, type]]:
     """{field_name: (kind, extra)} for every column a .cimtbl row may set on
     this CIM class - every dataclass field except pure reverse/derived
     associations (serialize=False) and identity bookkeeping (mRID/identifier,
-    handled separately)."""
-    hints = typing.get_type_hints(cim_cls)
+    handled separately). Cached per class, like graph_write.type_hints; do
+    not mutate the result."""
+    hints = graph_write.type_hints(cim_cls)
     classified = {}
     for field in dataclasses.fields(cim_cls):
         if field.name in _SKIP_FIELDS or field.metadata.get('serialize') is False:
