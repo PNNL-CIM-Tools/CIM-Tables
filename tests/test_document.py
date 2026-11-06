@@ -194,3 +194,10 @@ def test_xfm1_xfo_catalog_loads():
     assert len(bound) == 7
     mesh = graph_write.resolve(network, cim.TransformerMeshImpedance, 'xc_XFM1_XFO_mesh_12')
     assert mesh.r.to('ohm') == pytest.approx(0.38073, abs=1e-5)
+
+
+def test_write_documents_writes_utf8_with_lf_line_endings(tmp_path):
+    master = Document('master', [Table('BaseVoltage', [Column('mRID'), Column('name')], [Row(['bv_1', 'Zürich']), Row(['bv_2', 'b'])])])
+    path = write_documents(DocumentSet(master, []), tmp_path)
+    assert path.read_bytes() == format_document(master).encode('utf-8')
+    assert b'\r' not in path.read_bytes()

@@ -238,8 +238,35 @@ def test_setting_declared_twice_raises():
 def test_import_model_mismatch_raises(tmp_path):
     (tmp_path / 'catalog.cimtbl').write_text('Model = catalog\n')
     (tmp_path / 'main.cimtbl').write_text('Model = ieee13\nImport catalog.cimtbl\n')
-    with pytest.raises(ValueError, match='Model mismatch'):
+    with pytest.raises(parser.CimtblParseError, match=r"main\.cimtbl:2: Import 'catalog.cimtbl': Model mismatch"):
         parser.parse_file(tmp_path / 'main.cimtbl')
+
+
+def test_import_cycle_raises(tmp_path):
+    (tmp_path / 'a.cimtbl').write_text('Import b.cimtbl\n')
+    (tmp_path / 'b.cimtbl').write_text('\nImport a.cimtbl\n')
+    with pytest.raises(parser.CimtblParseError, match=r"b\.cimtbl:2: Import 'a.cimtbl': Import cycle a.cimtbl -> b.cimtbl -> a.cimtbl"):
+        parser.parse_file(tmp_path / 'a.cimtbl')
+
+
+def test_self_import_raises(tmp_path):
+    (tmp_path / 'a.cimtbl').write_text('Import a.cimtbl\n')
+    with pytest.raises(parser.CimtblParseError, match='Import cycle a.cimtbl -> a.cimtbl'):
+        parser.parse_file(tmp_path / 'a.cimtbl')
+
+
+def test_a_file_imported_from_two_branches_is_not_a_cycle(tmp_path):
+    (tmp_path / 'shared.cimtbl').write_text('Object BaseVoltage: mRID=bv, nominalVoltage (kV)=12.47\n')
+    (tmp_path / 'lines.cimtbl').write_text('Import shared.cimtbl\n')
+    (tmp_path / 'main.cimtbl').write_text('Import shared.cimtbl\nImport lines.cimtbl\n')
+    records, _ = parser.parse_file(tmp_path / 'main.cimtbl')
+    assert [r.fields['mRID'] for r in records] == ['bv', 'bv']
+
+
+def test_file_is_read_as_utf8(tmp_path):
+    (tmp_path / 'main.cimtbl').write_bytes('Object BaseVoltage: mRID=bv, name=Zürich 12 kV\n'.encode('utf-8'))
+    records, _ = parser.parse_file(tmp_path / 'main.cimtbl')
+    assert records[0].fields['name'] == 'Zürich 12 kV'
 
 
 def test_same_class_two_header_shapes():

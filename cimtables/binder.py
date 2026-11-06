@@ -50,6 +50,12 @@ _SKIP_FIELDS = {'mRID', 'identifier', 'source_file', 'source_line'}
 _CONTAINER_FIELD = 'EquipmentContainer'
 
 
+class CimtblBindError(ValueError, TypeError):
+    """A row read from a file that failed to bind, as `<file>:<line>: <message>`;
+    the original ValueError/TypeError is its __cause__. It subclasses both, so
+    an `except ValueError` / `except TypeError` still catches what it did."""
+
+
 def _new_object(cim_cls: type, row: object) -> object:
     """The row's object, its UUID seeded from the row key: the mRID alone (so a
     rename keeps the UUID), or for an Identity-only class (no mRID field, e.g.
@@ -73,7 +79,20 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
     being. `container` is an explicit EquipmentContainer override (a
     builder's self.container); a row's own EquipmentContainer column still
     takes precedence over it, matching add_connectivity's existing fallback
-    order."""
+    order.
+
+    A ValueError/TypeError binding a row read from a file (row.source_file
+    set) is re-raised as CimtblBindError, prefixed with the row's file:line."""
+    try:
+        return _bind_row(network, row, obj, container)
+    except (ValueError, TypeError) as exc:
+        if not row.source_file:  # a hand-built row has no location to add
+            raise
+        raise CimtblBindError(f'{row.source_file}:{row.source_line}: {exc}') from exc
+
+
+def _bind_row(network: GraphModel, row: object, obj: object, container: object) -> object:
+    """bind_row without the error location."""
     row_cls_name = type(row).__name__
     ref_slots = validate.reference_slots(row_cls_name)
 

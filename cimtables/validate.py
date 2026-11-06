@@ -33,6 +33,7 @@ from enum import Enum
 from typing import Any
 
 from cimgraph.core.env_vars import get_cim_profile
+from cimprofiles import profile_module
 from cimprofiles.units.units import CIMUnit
 
 from cimtables.units import Qty
@@ -53,7 +54,10 @@ class _FieldKind:
 
 
 def _qualify(path: str) -> str:
-    return path if '.' in path else 'cimgraph.data_profile.' + path
+    """A profile's full module path, resolved the way cim-graph's
+    get_cim_profile resolves CIMG_CIM_PROFILE, so a short name ('cim17v40')
+    is network.cim's module and not the deprecated cimgraph.data_profile shim."""
+    return path if path.startswith(('cimprofiles.', 'cimgraph.')) else profile_module(path)
 
 
 def _cim_module(profile: str | None):

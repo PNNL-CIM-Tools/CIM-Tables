@@ -16,7 +16,7 @@ from cimgraph.core import get_cim_profile, get_model_authority, get_model_name, 
 from cimgraph.models import BusBranchModel, FeederModel, GraphModel, NodeBreakerModel
 
 from cimtables import connectivity, document, graph_write, synthetic, validate
-from cimtables.binder import bind_row
+from cimtables.binder import CimtblBindError, bind_row
 from cimtables.parser import CimtblParseError, Header, parse_file, parse_text
 from cimtables.records import RawRecord
 from cimtables.units import Qty
@@ -25,7 +25,7 @@ from cimtables.validate import CimtblValidationError
 __all__ = [
     'bind_row', 'connectivity', 'document', 'graph_write', 'synthetic', 'validate',
     'Header', 'parse_file', 'parse_text', 'RawRecord', 'Qty',
-    'CimtblParseError', 'CimtblValidationError', 'load', 'load_text', 'load_model',
+    'CimtblParseError', 'CimtblValidationError', 'CimtblBindError', 'load', 'load_text', 'load_model',
 ]
 
 
@@ -36,10 +36,9 @@ def load(path, network):
     same bind_row() a builder's from_table delegates to.
 
     The file's Authority=/Model= set the model scope its UUIDs are seeded
-    under; its Profile= (if any) is the one rows are validated against."""
+    under; its Profile= (if any) must be the network's profile."""
     records, header = parse_file(path)
-    _set_model_scope(header)
-    return [bind_row(network, validate.validate(r, profile=header.profile)) for r in records]
+    return _bind_records(network, records, header, str(path))
 
 
 def load_text(text: str, network, source_file: str = '<text>'):
@@ -50,8 +49,7 @@ def load_text(text: str, network, source_file: str = '<text>'):
     for record in records:
         if record.cim_class == '__import__':
             raise ValueError(f"{source_file}: Import {record.fields['path']!r} needs a file; use load(path, network)")
-    _set_model_scope(header)
-    return [bind_row(network, validate.validate(r, profile=header.profile)) for r in records]
+    return _bind_records(network, records, header, source_file)
 
 
 def load_model(path, model_cls: type[GraphModel] | None = None) -> GraphModel:
@@ -88,6 +86,18 @@ def load_model(path, model_cls: type[GraphModel] | None = None) -> GraphModel:
     if len(substations) == 1:
         network.container = substations[0]
     return network
+
+
+def _bind_records(network, records: list[RawRecord], header: Header, source: str) -> list:
+    """Validate and bind records onto network under the file's model scope,
+    after checking the file's Profile= (if any) is network.cim's: rows are
+    validated against the file's profile but bound with network.cim's classes."""
+    if header.profile is not None and validate._cim_module(header.profile) is not network.cim:
+        raise CimtblValidationError(
+            f"{source}: Profile = {header.profile}, but the network's profile is {network.cim.__name__}"
+        )
+    _set_model_scope(header)
+    return [bind_row(network, validate.validate(r, profile=header.profile)) for r in records]
 
 
 def _set_model_scope(header: Header) -> None:

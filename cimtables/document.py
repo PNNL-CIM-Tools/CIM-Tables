@@ -179,5 +179,5 @@ def write_documents(documents: DocumentSet, directory) -> Path:
     texts = {document.name: format_document(document) for document in all_documents}
     directory.mkdir(parents=True, exist_ok=True)
     for name, text in texts.items():
-        (directory / f'{name}.cimtbl').write_text(text)
+        (directory / f'{name}.cimtbl').write_text(text, encoding='utf-8', newline='\n')
     return directory / f'{documents.master.name}.cimtbl'

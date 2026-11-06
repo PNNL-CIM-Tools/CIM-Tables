@@ -9,7 +9,7 @@ from cimtables.records import RawRecord
 
 _GRAMMAR_PATH = Path(__file__).parent / 'grammar.lark'
 _LARK_PARSER = lark.Lark(
-    _GRAMMAR_PATH.read_text(),
+    _GRAMMAR_PATH.read_text(encoding='utf-8'),
     parser='lalr',
     propagate_positions=True,
 )
@@ -184,17 +184,18 @@ def parse_text(text: str, source_file: str = '<text>') -> tuple[list[RawRecord],
     return records, header
 
 
-def _merge_header(path: Path, header: Header, import_path: Path, imported: Header) -> Header:
-    """An Import's settings fill the ones `path` (or an earlier Import) left
-    unset; one that disagrees with an already-set value raises."""
+def _merge_header(header: Header, imported: Header, import_path: Path, where: str) -> Header:
+    """An Import's settings fill the ones the importing file (or an earlier
+    Import) left unset; one that disagrees with an already-set value raises,
+    at `where` (the Import statement's `file:line: Import 'x'`)."""
     for setting in fields(Header):
         value, imported_value = getattr(header, setting.name), getattr(imported, setting.name)
         if value is None:
             header = replace(header, **{setting.name: imported_value})
         elif imported_value is not None and imported_value != value:
-            raise ValueError(
-                f"{setting.name.capitalize()} mismatch: {path} declares {value!r} but "
-                f"import {import_path} declares {imported_value!r}"
+            raise CimtblParseError(
+                f"{where}: {setting.name.capitalize()} mismatch: {import_path} declares "
+                f"{imported_value!r}, but {value!r} is already set"
             )
     return header
 
@@ -210,21 +211,35 @@ def parse_file(path: str | Path) -> tuple[list[RawRecord], Header]:
     never reach the returned list themselves. Each setting is declared at
     most once per file/Import chain (§3.9) - an imported file declaring a
     *different* value than one already set earlier in the chain is a
-    fail-fast error, not a silent override. The parser applies none of them.
+    fail-fast error, not a silent override. An Import cycle raises. The
+    parser applies none of the settings.
     """
-    path = Path(path)
-    text = path.read_text()
+    return _parse_file(Path(path), importers=())
+
+
+def _parse_file(path: Path, importers: tuple[Path, ...]) -> tuple[list[RawRecord], Header]:
+    """parse_file for `path`, imported (directly or not) by `importers`, the
+    resolved paths of the Import chain outermost first. An Import of a file
+    already on the chain is a cycle and raises; the same file imported twice
+    from different branches is not (its duplicate mRIDs raise at bind)."""
+    text = path.read_text(encoding='utf-8')
     raw_records, header = parse_text(text, source_file=str(path))
+    chain = (*importers, path.resolve())
 
     records: list[RawRecord] = []
     for record in raw_records:
         if record.cim_class == '__import__':
             import_path = path.parent / record.fields['path']
+            where = f"{path}:{record.source_line}: Import {record.fields['path']!r}"
             if not import_path.is_file():
-                raise CimtblParseError(f"{path}:{record.source_line}: Import {record.fields['path']!r}: {import_path} not found")
-            imported_records, imported_header = parse_file(import_path)
+                raise CimtblParseError(f"{where}: {import_path} not found")
+            resolved = import_path.resolve()
+            if resolved in chain:
+                cycle = chain[chain.index(resolved):] + (resolved,)
+                raise CimtblParseError(f"{where}: Import cycle {' -> '.join(p.name for p in cycle)}")
+            imported_records, imported_header = _parse_file(import_path, chain)
             records.extend(imported_records)
-            header = _merge_header(path, header, import_path, imported_header)
+            header = _merge_header(header, imported_header, import_path, where)
             continue
         records.append(record)
 

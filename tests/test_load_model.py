@@ -7,7 +7,7 @@ import os
 os.environ['CIMG_CIM_PROFILE'] = 'cim18v17'
 
 import pytest
-from cimgraph.core import get_model_authority, get_model_name, set_model_scope
+from cimgraph.core import get_cim_profile, get_model_authority, get_model_name, set_model_scope
 from cimgraph.databases import XMLFile
 from cimgraph.models import BusBranchModel, FeederModel, NodeBreakerModel
 from cimgraph.utils import write_xml
@@ -112,6 +112,34 @@ def test_load_text_rejects_an_import():
     network = NodeBreakerModel(container=None, connection=None, distributed=False)
     with pytest.raises(ValueError, match=r"Import 'lines.cimtbl' needs a file"):
         cimtables.load_text('Import lines.cimtbl\n', network)
+
+
+def test_load_text_rejects_a_profile_other_than_the_networks():
+    network = NodeBreakerModel(container=None, connection=None, distributed=False)
+    with pytest.raises(cimtables.CimtblValidationError, match=r"x\.cimtbl: Profile = cim17v40, but the network's profile is cimprofiles\.cim18\.cim18v17"):
+        cimtables.load_text('Profile = cim17v40\nObject BaseVoltage: mRID=bv\n', network, source_file='x.cimtbl')
+
+
+def test_load_text_accepts_the_networks_profile_by_its_short_name(monkeypatch):
+    """CIMG_CIM_PROFILE spelled in full, Profile= short: the same module, no mismatch."""
+    monkeypatch.setenv('CIMG_CIM_PROFILE', 'cimprofiles.cim18.cim18v17')
+    get_cim_profile.cache_clear()
+    try:
+        network = NodeBreakerModel(container=None, connection=None, distributed=False)
+        cimtables.load_text('Profile = cim18v17\nObject BaseVoltage: mRID=bv\n', network)
+    finally:
+        monkeypatch.undo()
+        get_cim_profile.cache_clear()
+    assert network.find_by_mRID('bv') is not None
+
+
+def test_bind_error_names_the_row_file_and_line():
+    network = NodeBreakerModel(container=None, connection=None, distributed=False)
+    with pytest.raises(cimtables.CimtblBindError, match=r"^x\.cimtbl:3: 'l1': BaseVoltage 'missing' .* not found") as exc_info:
+        cimtables.load_text('Table ACLineSegment: mRID, BaseVoltage, node1, node2\n\n    l1, missing, a, b\n',
+                            network, source_file='x.cimtbl')
+    assert isinstance(exc_info.value, ValueError) and isinstance(exc_info.value, TypeError)
+    assert isinstance(exc_info.value.__cause__, ValueError)
 
 
 def test_feeder_model_keeps_the_files_base_power(tmp_path):
