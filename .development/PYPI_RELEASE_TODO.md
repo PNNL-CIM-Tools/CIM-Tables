@@ -38,7 +38,7 @@ Audit of `rc1` @ 21c41f7 (2026-11-06). State: 223 tests pass on Python 3.10 and 
 
 ## P1: documentation (PyPI users can't see CIM-Builder's design docs)
 
-- [ ] **README is two lines**, and it's the PyPI long description. It needs: install, a 10-line `load_model`
+- [x] (done: rewritten for people, why first; links are absolute so they work on PyPI) **README is two lines**, and it's the PyPI long description. It needs: install, a 10-line `load_model`
       example, the format at a glance (settings, `Import`, `Object`/`Table`, defaults, quoting, `(unit)`,
       `(pu system)`), connectivity columns (`node*`/`bus*`), `phases`/`phaseSide*`, the pu/percent base
       rules, `BasePower`, the supported profiles (cim18v17 tested; others reflective, untested), the
