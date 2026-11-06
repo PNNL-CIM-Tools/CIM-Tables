@@ -1,5 +1,4 @@
-"""Phase 3/5 graph-write core tests (design: CIMTBL_DESIGN.md §12.3,
-cimbuilder/development/GRAPH_WRITE_CONTRACT.md).
+"""Graph-write core tests.
 
 set_attr binds a Qty into the right CIMUnit subclass (verified via .to()) or
 passes a plain scalar straight through, checking `attr` against a reference

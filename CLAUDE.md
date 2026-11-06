@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `cimtables` implements the `.cimtbl` DSL — a hand-editable tabular text format for CIM power-system models — as parser → profile-reflective validator → binder onto live `cim-graph` objects. It was split out of CIM-Builder (`/home/ande188/CIM-Builder`, package `cimbuilder`), which now depends on this package. **`cimtables` must never import `cimbuilder`**; the dependency is strictly `cimprofiles` → `cim-graph` → `cimtables` → `cimbuilder`.
 
-Design history lives in CIM-Builder, not here: `/home/ande188/CIM-Builder/cimbuilder/development/CIMTBL_DESIGN.md` (format spec §3, connectivity §5, phase interface contracts §12, split rationale §8.1), plus `GRAPH_WRITE_CONTRACT.md` and `PROFILE_RESOLUTION.md` in the same directory. Module docstrings cite these by section number.
+The design of record is `docs/CIMTBL_DESIGN.md`: the format, the pipeline, and the decisions, as built. Keep it current when behaviour changes, and don't cite it (or anything else) by section number; reference headings by name. The pre-implementation design and its history are in CIM-Builder's git history (`cimbuilder/development/CIMTBL_DESIGN.md`, `GRAPH_WRITE_CONTRACT.md`, `PROFILE_RESOLUTION.md`); don't point code at them.
 
 Git-tracked `.cimtbl` grid models (the target for migrating OpenDSS models) live in the sibling repo `/home/ande188/CIMTBL-Models` (`PNNL-CIM-Tools/CIMTBL-Models`, working branch `feature/1`; `distribution/`, `transmission/`, `tiered_tso_dso/`). It's a plain clone, not a submodule — reference it by path; `tests/fixtures/` stays self-contained.
 
@@ -45,7 +45,7 @@ uv run pytest tests/test_parser.py::test_name -q     # one test
 
 ## Format conventions worth knowing
 
-- References are by `mRID`. Prefixes keep mRIDs unique across classes (`ld_671` vs bus `671`); the convention is the translator's (CIMTBL-Models' `cimtbl-translate` skill), not enforced beyond uniqueness. The design (CIMTBL_DESIGN §3.3) calls for second-pass resolution so forward references are legal, but `bind_row` resolves immediately: declare targets first. Where the profile serializes only one side of an association (e.g. cim18v17 `TransformerWinding.FromTransformerLug` is `serialize=False`), write it from the other side.
+- References are by `mRID`. Prefixes keep mRIDs unique across classes (`ld_671` vs bus `671`); the convention is the translator's (CIMTBL-Models' `cimtbl-translate` skill), not enforced beyond uniqueness. `bind_row` resolves references immediately, so declare targets first (second-pass resolution for forward references is an open question in the design doc). Where the profile serializes only one side of an association (e.g. cim18v17 `TransformerWinding.FromTransformerLug` is `serialize=False`), write it from the other side.
 - The same class may appear with different header shapes (e.g. `ACLineSegment` by `bus1/bus2` + `r (pu)` vs `node1/node2` + `phases` + `PerLengthImpedance`); presence/absence of fields is the dispatch signal — rows carry no shape flag.
 - Matrix impedance is literal `PhaseImpedanceData` rows only; compact `rmatrix`/`xmatrix` sugar is deliberately not supported.
 - Source names are kept verbatim, never sanitized: a value with `,` `#` `(` `)` or edge whitespace is quoted (`"#2_ACSR_6/1"`, `"DEFAULT (DC)"`). The UUID is seeded from the mRID, so renaming would change it; CIM XML takes any mRID string.

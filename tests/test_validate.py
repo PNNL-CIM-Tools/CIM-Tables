@@ -1,9 +1,8 @@
-"""Phase 2 reflection validation gate tests (design: CIMTBL_DESIGN.md §8 exit criterion).
+"""Reflection validation gate tests.
 
-validate.validate() turns a RawRecord (§12.1) into a validated <Class>Row
-(§12.2). Covers: unknown class, unknown column with closest-match
-suggestion, Qty binding for physical-quantity slots, FK pass-through as
-unresolved name strings, and correct native Python typing (int/bool/float)
+validate.validate() turns a RawRecord into a validated <Class>Row. Covers:
+unknown class, unknown column with closest-match suggestion, Qty binding for
+physical-quantity slots, FK pass-through as unresolved mRID strings, and correct native Python typing (int/bool/float)
 for plain scalar slots.
 """
 
@@ -33,7 +32,7 @@ def test_unknown_column_suggests_closest_match():
 def test_object_form_scalar_fields():
     row = validate.validate(_record('BaseFrequency', {'mRID': 'base_freq', 'frequency': '60'}, form='Object'))
     assert row.mRID == 'base_freq'
-    # frequency is a physical-quantity slot (§4.3) - always a Qty, even with
+    # frequency is a physical-quantity slot - always a Qty, even with
     # no unit on the .cimtbl column (blank unit string, not a bare float).
     assert row.frequency == Qty(60.0, '')
 

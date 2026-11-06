@@ -1,26 +1,21 @@
-"""Phase 3/5: set_attr / set_assc / add_to_graph / resolve
-(design: CIMTBL_DESIGN.md §12.3 and GRAPH_WRITE_CONTRACT.md, both in
-CIM-Builder's cimbuilder/development/ - this package's design history predates
-its split from CIM-Builder into its own repo; see that repo's
-CIMTBL_DESIGN.md §8.1 for the split rationale).
-
-The graph-write core: the only place that actually mutates a live cimgraph
-object or writes it into a GraphModel. Everything else (the binder, the
+"""The graph-write core - set_attr / set_assc / add_to_graph / resolve: the
+only place that actually mutates a live cimgraph object or writes it into a
+GraphModel. Everything else (the binder, the
 connectivity backend, builder add_<part> methods) calls through here rather
 than touching `setattr`/`network.add_to_graph` directly, so unit-binding,
 profile-part checking, reverse-association writes, and mRID-indexing can
 never be forgotten at a call site.
 
 set_attr/set_assc's `part` argument is a reference profile-part module (e.g.
-cimgraph.data_profile.cim18gmdm.connectivity) checked purely by name against
+cimprofiles.cim18.cim18gmdm.connectivity) checked purely by name against
 type(obj).__name__ - never by isinstance/inheritance. `obj` need not (and
 usually won't) be an instance of any class in `part`; `part` is a shape
-reference, not `obj`'s actual runtime profile. See GRAPH_WRITE_CONTRACT.md §2
-and PROFILE_RESOLUTION.md (CIM-Builder's development docs) for why this is
-the right decoupling. Passing the merged `network.cim` module itself as
-`part` is a documented no-op check (every field passes, since a merged
-profile has no restricted attribute set) - the right choice at a call site
-with no genuine part-scoped reference available yet (Phase 3/4 code).
+reference, not `obj`'s actual runtime profile, so a builder's add_<part>
+method can check it writes only its profile slice's fields. Passing the
+merged `network.cim` module itself as `part` is a documented no-op check
+(every field passes, since a merged profile has no restricted attribute
+set) - the right choice at a reflective call site (binder, connectivity),
+where validate.py has already decided which columns a row may carry.
 """
 
 import dataclasses
@@ -40,8 +35,8 @@ T = TypeVar("T")
 
 def _part_field(part: ModuleType, obj: object, attr: str) -> dataclasses.Field:
     """The dataclasses.Field for `attr` on part's class of the same name as
-    type(obj) - the one runtime check standing in for Pylance's static
-    narrowing (GRAPH_WRITE_CONTRACT.md §2). Raises ValueError, naming the
+    type(obj) - a runtime check, since static typing can't narrow a merged
+    profile's classes to one slice. Raises ValueError, naming the
     part module and class, if `attr` isn't a real field there at all."""
     cls_name = type(obj).__name__
     part_cls = getattr(part, cls_name, None)
@@ -186,7 +181,7 @@ def set_assc(obj: object, part: ModuleType, assc: str, target: object) -> object
 
 
 def add_to_graph(network: GraphModel, obj: object) -> None:
-    """The single call site (§12.3): add obj to the live graph, which also
+    """The single call site: add obj to the live graph, which also
     indexes its mRID (cim-graph raises on an mRID already used by another
     object - mRIDs are unique within the model, not per class).
 

@@ -1,4 +1,4 @@
-// Phase 1: FIXED grammar (design: CIMTBL_DESIGN.md §2.1, §3).
+// The FIXED, profile-agnostic .cimtbl grammar: it knows no CIM class names.
 //
 // Line-oriented: each statement starts at column 0 and ends at a line break.
 // Table data rows are indented but that indentation is not significant to

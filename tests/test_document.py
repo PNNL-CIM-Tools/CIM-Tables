@@ -163,7 +163,7 @@ def test_write_documents_rejects_a_stale_file_and_writes_nothing(tmp_path):
 
 
 def test_xfm1_xfo_catalog_loads():
-    # CIMHub's acceptance snapshot (CIMTBL_REWRITE_PLAN.md §3.2)
+    # CIMHub's acceptance snapshot (its CIMTBL_REWRITE_PLAN.md)
     document = Document('transformer_db', [
         Table('TransformerTankConfiguration', [
             Column('mRID'), Column('name'), Column('description'), Column('percentImpedance'),

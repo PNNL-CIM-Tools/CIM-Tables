@@ -1,4 +1,4 @@
-"""Phase 1: intermediate record dataclasses (design: CIMTBL_DESIGN.md §12.1)."""
+"""RawRecord: the parser's output, validate.py's input."""
 
 from dataclasses import dataclass
 from typing import Literal
@@ -7,8 +7,8 @@ from typing import Literal
 @dataclass
 class RawRecord:
     """One Object/Table row, straight off the grammar. Every cell is still a
-    str (or None for a blank cell) - no CIM knowledge, no coercion. Phase 2
-    is the only consumer."""
+    str (or None for a blank cell) - no CIM knowledge, no coercion.
+    validate.py is the only consumer."""
 
     form: Literal['Object', 'Table']
     cim_class: str

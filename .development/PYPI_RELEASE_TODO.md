@@ -42,11 +42,11 @@ Audit of `rc1` @ 21c41f7 (2026-11-06). State: 223 tests pass on Python 3.10 and 
       rules, `BasePower`, the supported profiles (cim18v17 tested; others reflective, untested), the
       process-global side effects (`load_model` writes `CIMG_CIM_PROFILE`; `load`/`load_model` set the model
       scope), and a link to CIMTBL-Models.
-- [ ] Bring the format spec (CIMTBL_DESIGN §3, §5) into this repo as `docs/FORMAT.md`, or publish it somewhere
+- [x] Bring the format spec into this repo (done: `docs/CIMTBL_DESIGN.md`, rewritten as built), or publish it somewhere
       linkable. Every module docstring cites `CIMTBL_DESIGN.md §…`, `GRAPH_WRITE_CONTRACT.md` or
       `PROFILE_RESOLUTION.md`, and none of them ship.
-- [ ] A user-facing error message cites a private doc: `connectivity._resolve_node` "per CIMTBL_DESIGN.md §3.5".
-- [ ] Scrub the "Phase 1/2/3/4/5/5b/R" labels from docstrings (`parser`, `records`, `validate`, `binder`,
+- [x] A user-facing error message cites a private doc: `connectivity._resolve_node` "per CIMTBL_DESIGN.md §3.5".
+- [x] Scrub the "Phase 1/2/3/4/5/5b/R" labels from docstrings (`parser`, `records`, `validate`, `binder`,
       `graph_write`, `connectivity`, `grammar.lark`). They're build-plan history, not API. `units.py`'s docstring
       is stale: it mentions to_cimunit/z_base helpers that live in `graph_write`/`impedance`.
 - [ ] Add `CHANGELOG.md`.

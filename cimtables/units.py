@@ -1,8 +1,7 @@
-"""Qty carrier + %Z / pu / ohm normalization helpers (design: CIMTBL_DESIGN.md §4.3).
+"""Qty: the value + unit carrier for a `(unit)` column.
 
-Qty itself is needed starting Phase 2 (it's a field type on the generated
-<Class>Row dataclasses, §12.2); the to_cimunit/z_base conversion helpers are
-Phase 5b.
+validate.py puts one in every unit-bearing <Class>Row field; the conversion
+to a CIMUnit (pu/percent through impedance.z_base) is graph_write.set_attr's.
 """
 
 from dataclasses import dataclass

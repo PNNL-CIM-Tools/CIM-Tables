@@ -1,5 +1,4 @@
-"""Phase 3/5: reflective column -> attr/assoc/connectivity binder (design, in
-CIM-Builder's cimbuilder/development/: CIMTBL_DESIGN.md §2.1, §4.2).
+"""The reflective binder: one validated <Class>Row -> one live cim-graph object.
 
 bind_row is the one generic entry point from a validated <Class>Row to a live
 cim-graph object, for every class in the selected CIM profile - no per-class
@@ -13,16 +12,15 @@ of these buckets:
 - the synthetic `phases` / `phaseSide1` + `phaseSide2` shorthand (only
   where the class has no real attribute of that name) ->
   connectivity.add_phase_children: Terminal.phases
-  plus <Class>Phase children (§3.6)
+  plus <Class>Phase children
 - EquipmentContainer -> resolved by mRID via graph_write.resolve (its range is
   always an abstract base: Feeder, Substation, ... - see validate.py's
-  reference_target_class) and passed to add_connectivity as the container
-  override, not set directly
+  reference_target_class) and used as the container: passed to
+  add_connectivity when the row has connectivity, else set directly
 - any other reference slot (FK) -> resolved by mRID via graph_write.resolve()
   against the schema's own range class and written with set_assc;
   an unresolved mRID raises
-- everything else -> a plain scalar/Qty, written with set_attr (unchanged
-  from Phase 3)
+- everything else -> a plain scalar/Qty, written with set_attr
 
 pu/percent impedances/admittances (r, x, bch, ...) are written last,
 converted to ohms/siemens against impedance.z_base: the rating pair of the
@@ -37,7 +35,7 @@ See .development/PERCENT_IMPEDANCE_BASE.md.
 set_attr/set_assc are called with network.cim as `part` throughout - the
 documented no-op part-check (graph_write.py's module docstring) appropriate
 at a genuinely reflective call site with no class-specific reference module
-to check against. See CIM-Builder's development/PROFILE_RESOLUTION.md.
+to check against.
 """
 
 import dataclasses

@@ -1,8 +1,6 @@
-"""Phase 4 connectivity backend tests (design: CIMTBL_DESIGN.md §5, §12.4).
-
-"ACLineSegment with node1/node2/phases -> terminals + N ACLineSegmentPhase;
-undeclared nodes auto-vivified; bus* -> TopologicalNode disambiguation proven
-on the line_1_2 sequence row." (§8's Phase 4 exit criterion.)
+"""Connectivity backend tests: ACLineSegment with node1/node2/phases ->
+terminals + N ACLineSegmentPhase; undeclared nodes auto-vivified; bus* ->
+TopologicalNode disambiguation on the line_1_2 sequence row.
 """
 
 import os

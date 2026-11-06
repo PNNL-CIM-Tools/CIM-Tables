@@ -1,1 +1,1 @@
-"""Phase R: cimgraph -> .cimtbl writer (design: CIMTBL_DESIGN.md §6, §12.6)."""
+"""cimgraph -> .cimtbl writer: not implemented yet (planned design: docs/CIMTBL_DESIGN.md)."""

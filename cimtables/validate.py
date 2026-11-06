@@ -1,26 +1,23 @@
-"""Phase 2: pure-Python reflection validation gate (design, in CIM-Builder's
-cimbuilder/development/: CIMTBL_DESIGN.md §2.1, §12.2 - reflection on the live
-profile, no LinkML; see PROFILE_RESOLUTION.md there).
+"""The validation gate: RawRecord -> <Class>Row, by pure-Python reflection
+on the live CIM profile (no LinkML, no curated schema).
 
-RawRecord (§12.1) -> <Class>Row (§12.2). Validation reflects directly on the
-live CIM dataclass named by the record (resolved from whichever profile
-Profile= selected, via cim-graph's own get_cim_profile()) instead of
-constructing a generated LinkML class - any class in the selected profile is
-automatically valid, with no per-version curation file to maintain. The only
-columns a CIM profile can never explain are this package's own connectivity/
-phases shorthand (synthetic.py), which are added to every
-<Class>Row unconditionally.
+Validation reflects directly on the live CIM dataclass named by the record
+(resolved from whichever profile Profile= selected, via cim-graph's own
+get_cim_profile()) - any class in the selected profile is automatically
+valid, with no per-version curation file to maintain. The only columns a CIM
+profile can never explain are this package's own connectivity/phases
+shorthand (synthetic.py), added to every <Class>Row unless the class has a
+real attribute of the same name.
 
 A field is classified the same way graph_write.py already classifies one
 when writing to a live object: `metadata['serialize'] is False` marks a pure
 reverse/derived association cimgraph itself never constructs from
 (Measurements, Terminals, ...) - excluded entirely, never a column. Of the
 rest, a field whose type union contains a CIMUnit subclass (Voltage,
-ActivePower, ...) is a physical-quantity slot (§4.3) and becomes a Qty; a
+ActivePower, ...) is a physical-quantity slot and becomes a Qty; a
 field whose type union contains another CIM dataclass is a reference/FK slot
-(§3.3) and stays an unresolved name string, exactly as before - resolving a
-mRID into a live object is still binder.py's job (graph_write.resolve), never
-validate's; everything else is a plain scalar, coerced from the record's raw
+and stays an unresolved mRID string - resolving an mRID into a live object is
+binder.py's job (graph_write.resolve), never validate's; everything else is a plain scalar, coerced from the record's raw
 string with _coerce.
 """
 
@@ -44,7 +41,7 @@ _SKIP_FIELDS = {'mRID', 'identifier'}
 
 
 class CimtblValidationError(ValueError):
-    """Fail-fast, profile-anchored validation error (§8 Phase 2 exit criterion)."""
+    """Fail-fast, profile-anchored validation error, as `<file>:<line>: <message>`."""
 
 
 class _FieldKind:
@@ -119,10 +116,10 @@ def _real_fields(cim_cls: type) -> dict[str, tuple[str, type]]:
 def reference_slots(row_cls_name: str, *, profile: str | None = None) -> set[str]:
     """Names of the class's FK slots - slots whose range is itself a CIM
     class (BaseVoltage, PerLengthImpedance, LoadResponse, ...) rather than a
-    scalar type. These stay unresolved name strings at this phase (§3.3,
-    §12.2) and must never reach the CIM class's own constructor.
+    scalar type. These stay unresolved mRID strings in a <Class>Row and must
+    never reach the CIM class's own constructor.
 
-    Public: Phase 4/5's generic bind_row (binder.py) also uses this to tell
+    Public: bind_row (binder.py) also uses this to tell
     an FK column apart from a plain scalar, with no per-class FK list to
     maintain."""
     cim_cls_name = row_cls_name.removesuffix('Row')
@@ -137,8 +134,8 @@ def reference_slots(row_cls_name: str, *, profile: str | None = None) -> set[str
 def reference_target_class(row_cls_name: str, slot_name: str, *, profile: str | None = None) -> str:
     """The CIM class name a reference slot resolves against (e.g.
     'BaseVoltage', 'LoadResponseCharacteristic', 'EquipmentContainer') - what
-    Phase 4/5 needs to call graph_write.resolve()
-    generically, with no per-class FK table to maintain."""
+    bind_row needs to call graph_write.resolve() generically, with no
+    per-class FK table to maintain."""
     cim_cls_name = row_cls_name.removesuffix('Row')
     cim_module = _cim_module(profile)
     cim_cls = getattr(cim_module, cim_cls_name)
@@ -147,7 +144,7 @@ def reference_target_class(row_cls_name: str, slot_name: str, *, profile: str | 
 
 
 def _coerce(raw: str, py_type: type) -> Any:
-    """record.fields values are always raw strings off the parser (§12.1) -
+    """record.fields values are always raw strings off the parser -
     this is the str->real-type coercion a generated LinkML class used to do
     for us."""
     if py_type is bool:
@@ -163,7 +160,7 @@ def _coerce(raw: str, py_type: type) -> Any:
 
 
 def _row_dataclass(row_cls_name: str, profile: str) -> type:
-    """The plain <Class>Row dataclass (§12.2), built once per (profile,
+    """The plain <Class>Row dataclass, built once per (profile,
     class) from the live CIM dataclass's own fields plus the DSL's synthetic
     columns - reflects the real profile, so it can't drift from it."""
     key = (profile, row_cls_name)
@@ -214,7 +211,7 @@ def _closest_attribute_error(valid: list[str], bad_column: str, source_file: str
 
 
 def validate(record: records.RawRecord, *, profile: str | None = None) -> object:
-    """RawRecord -> validated <Class>Row (§12.2), or raises CimtblValidationError."""
+    """RawRecord -> validated <Class>Row, or raises CimtblValidationError."""
     profile = profile or os.environ.get('CIMG_CIM_PROFILE')
     row_cls_name = f'{record.cim_class}Row'
     cim_cls_name = record.cim_class

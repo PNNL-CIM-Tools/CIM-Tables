@@ -1,4 +1,4 @@
-"""Phase 1: Lark grammar -> records (design: CIMTBL_DESIGN.md §3, §12.1)."""
+"""The parser: .cimtbl text -> RawRecords (grammar.lark) plus the file's Header of settings."""
 
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
@@ -24,7 +24,7 @@ def _cell_text(cell_node: lark.Tree) -> str | None:
     """A `cell` node is `value` (one VALUE token, possibly with incidental
     leading/trailing whitespace the grammar doesn't strip), `quoted` (a
     CSV-style "..." token) or `blank` (no token at all). A blank or
-    empty-after-stripping value is None (§12.1) - a lone space between two
+    empty-after-stripping value is None - a lone space between two
     commas is indistinguishable in intent from no character at all. A quoted
     cell is taken verbatim, `""` -> `"`, so `""` is the empty string, not unset."""
     if cell_node.data == 'blank':
@@ -53,7 +53,7 @@ def _header_cell_name_unit_default(header_cell_node: lark.Tree) -> tuple[str, st
 @dataclass(frozen=True)
 class Header:
     """A file's settings statements, each None if absent: `Profile =` (the CIM
-    profile, §3.9), `Authority =` and `Model =` (the model authority URI and
+    profile), `Authority =` and `Model =` (the model authority URI and
     model name that UUIDs are seeded under, see cimgraph.core.set_model_scope).
     Applied by cimtables.load / load_model, never by the parser."""
     profile: str | None = None
@@ -65,7 +65,7 @@ _HEADER_STATEMENTS = {'profile_stmt': 'profile', 'authority_stmt': 'authority', 
 
 
 class _RecordBuilder(lark.Transformer):
-    """Parse tree -> flat list[RawRecord] (§12.1). Table statements expand
+    """Parse tree -> flat list[RawRecord]. Table statements expand
     to one RawRecord per data row, sharing that table's cim_class/units;
     Object statements become exactly one RawRecord. Import/Profile
     statements are handled by the driver functions below, not here - they
@@ -201,15 +201,15 @@ def _merge_header(header: Header, imported: Header, import_path: Path, where: st
 
 
 def parse_file(path: str | Path) -> tuple[list[RawRecord], Header]:
-    """The public Phase 1 entry point (§12.1): a .cimtbl file -> the fully-
-    composed, ordered RawRecord list Phase 2 consumes, plus the Header of
+    """The public parser entry point: a .cimtbl file -> the fully-composed,
+    ordered RawRecord list validate.py consumes, plus the Header of
     Profile/Authority/Model settings the file/Import chain declared.
 
-    Import statements (§3.3) are resolved here by textual composition: each
+    Import statements are resolved here by textual composition: each
     imported file is recursively parsed (relative to the importing file's
     directory) and its records spliced in at that position. Import records
     never reach the returned list themselves. Each setting is declared at
-    most once per file/Import chain (§3.9) - an imported file declaring a
+    most once per file/Import chain - an imported file declaring a
     *different* value than one already set earlier in the chain is a
     fail-fast error, not a silent override. An Import cycle raises. The
     parser applies none of the settings.

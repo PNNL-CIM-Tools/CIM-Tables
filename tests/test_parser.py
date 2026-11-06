@@ -1,9 +1,9 @@
-"""Phase 1 grammar/parser tests (design: CIMTBL_DESIGN.md §8 exit criterion).
+"""Grammar/parser tests.
 
 Covers every construct in isolation (Object, Table, Import, comments, blank
 lines, unit-suffixed columns, blank cells) plus the real sample files
 (ieee13.cimtbl, ieee14.cimtbl, wire_infos.cimtbl) end to end, including
-through Phase 2's validate() so the whole pipe is exercised with a real
+through validate() so the whole pipe is exercised with a real
 parser instead of hand-built RawRecords.
 """
 
@@ -397,7 +397,7 @@ _KNOWN_SCHEMA_GAPS = {
 }
 
 
-def test_ieee13_validates_end_to_end_through_phase2():
+def test_ieee13_validates_end_to_end():
     records, _ = parser.parse_file(SAMPLES_DIR / 'ieee13.cimtbl')
     checked = 0
     for record in records:

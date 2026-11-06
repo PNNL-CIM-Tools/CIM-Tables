@@ -1,7 +1,7 @@
-"""Phase 4: the connectivity backend - node/bus/terminal/phase (design: CIMTBL_DESIGN.md §5, §12.4).
+"""The connectivity backend - node/bus/terminal/phase.
 
-The one place that acts on §3.5's node/bus columns (synthetic.CONNECTIVITY_COLUMNS) and §3.6's phase-child
-synthesis. Every Builder's add_connectivity (Phase 5) is a thin wrapper around
+The one place that acts on the node/bus columns (synthetic.CONNECTIVITY_COLUMNS)
+and the phases shorthand. bind_row and every builder's add_connectivity call
 these two functions - no per-class node-vs-bus or phase logic anywhere else.
 """
 
@@ -38,8 +38,7 @@ def _resolve_node(network: GraphModel, col_name: str, node_mrid: str,
     if synthetic.CONNECTIVITY_COLUMNS.get(col_name, ('', 0))[0] != node_class_name:
         valid = [c for c, (cls_name, _) in synthetic.CONNECTIVITY_COLUMNS.items() if cls_name == node_class_name]
         raise ValueError(
-            f"{col_name!r} is not a {node_class_name} connectivity column (one of {valid}, "
-            f"per CIMTBL_DESIGN.md §3.5)"
+            f"{col_name!r} is not a {node_class_name} connectivity column (one of {valid})"
         )
     node_cls = getattr(network.cim, node_class_name)
     node_obj = graph_write.resolve(network, node_cls, node_mrid)
@@ -165,7 +164,7 @@ _NEXT_PHASE = {'A': 'B', 'B': 'C', 'C': 'A', 's1': 's2'}
 def add_phase_children(network: GraphModel, obj: CN.ConductingEquipment, terminals: list[CN.Terminal], *,
                        phases: str | None = None, phaseSide1: str | None = None,
                        phaseSide2: str | None = None) -> list[CN.PowerSystemResource]:
-    """phases='ABCN' -> per-phase children (e.g. ACLineSegmentPhase) per §3.6,
+    """phases='ABCN' -> per-phase children (e.g. ACLineSegmentPhase),
     wired to obj. Every terminal gets the canonical PhaseCode of the set.
 
     phaseSide1='AB', phaseSide2='AC' instead of phases: a switch whose sides

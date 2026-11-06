@@ -1,7 +1,6 @@
 """cimtables: the .cimtbl DSL - parser, profile-reflective validator, and
-graph-write/binder core for cim-graph. Split out of CIM-Builder (see that
-repo's cimbuilder/development/CIMTBL_DESIGN.md §8.1 for why); has never
-depended on CIM-Builder's builder layer.
+graph-write/binder core for cim-graph (design: docs/CIMTBL_DESIGN.md). It
+never imports cimbuilder, which depends on it.
 
 `load()` is the package's own minimal, ObjectBuilder-free entry point: parse
 a .cimtbl file, validate every record against the network's active CIM

@@ -1,12 +1,10 @@
-"""Phase 3 exit-criterion test (design: CIMTBL_DESIGN.md §8).
+"""bind_row tests: the simplest real classes end to end into a live cimgraph
+model (BaseVoltage, BaseFrequency, BasePower, EnergySource). network.cim is
+read once; plain scalar attrs + units land correctly (verified via .to());
+objects are keyed by mRID (cim-graph's index, populated at the add_to_graph
+call site), and an mRID reused by another object - in any class - raises.
 
-"Simplest real classes end-to-end into a live cimgraph model: BaseVoltage,
-BaseFrequency, BasePower, EnergySource. network.cim read once; plain scalar
-attrs + units land correctly (verified via .to()); objects are keyed by
-mRID (cim-graph's index, populated at the add_to_graph call site), and an
-mRID reused by another object - in any class - raises."
-
-ieee13.cimtbl is parsed and validated through the real Phase 1/2 pipeline
+ieee13.cimtbl is parsed and validated through the real parser and validator
 (no hand-built records) and bound into a real BusBranchModel.
 """
 
