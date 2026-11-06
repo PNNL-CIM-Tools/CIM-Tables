@@ -225,3 +225,26 @@ def test_pu_system_column_puts_a_rated_end_on_the_system_base(network):
 def test_only_pu_or_percent_take_only_the_system_base(network, unit):
     with pytest.raises(validate.CimtblValidationError, match="only pu/percent take a base, and only 'system'"):
         _bind_text(network, f'Object ACLineSegment: mRID=line_1, r ({unit})=0.01\n')
+
+
+def test_base_power_row_sets_the_system_base(network):
+    # SBASE != 100: a bound BasePower must replace the env/default 100 MVA
+    _bind_text(network, _PU_LINE + (
+        'Object BasePower: mRID=sbase, basePower (MVA)=50\n'
+        'Object ACLineSegment: mRID=line_1, BaseVoltage=bv_115kv, r (pu)=0.01938\n'
+    ))
+    line = graph_write.resolve(network, cim.ACLineSegment, 'line_1')
+    assert network.base_power.to('MVA') == pytest.approx(50)
+    assert line.r.to('ohm') == pytest.approx(0.01938 * 115000 ** 2 / 50e6)
+
+
+def test_second_base_power_must_agree(network):
+    _bind_text(network, 'Object BasePower: mRID=sbase, basePower (MVA)=50\n'
+                        'Object BasePower: mRID=sbase_kva, basePower (kVA)=50000\n')
+    with pytest.raises(ValueError, match=r"BasePower 'sbase_100'.*disagrees with BasePower 'sbase'"):
+        _bind_text(network, 'Object BasePower: mRID=sbase_100, basePower (MVA)=100\n')
+
+
+def test_base_power_without_a_value_raises(network):
+    with pytest.raises(ValueError, match="BasePower 'sbase' has no basePower"):
+        _bind_text(network, 'Object BasePower: mRID=sbase\n')

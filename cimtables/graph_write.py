@@ -24,6 +24,7 @@ with no genuine part-scoped reference available yet (Phase 3/4 code).
 """
 
 import dataclasses
+import math
 import typing
 from types import ModuleType
 from typing import Type, TypeVar
@@ -187,7 +188,24 @@ def set_assc(obj: object, part: ModuleType, assc: str, target: object) -> object
 def add_to_graph(network: GraphModel, obj: object) -> None:
     """The single call site (§12.3): add obj to the live graph, which also
     indexes its mRID (cim-graph raises on an mRID already used by another
-    object - mRIDs are unique within the model, not per class)."""
+    object - mRIDs are unique within the model, not per class).
+
+    A BasePower sets network.base_power, the system base every later
+    system-base pu/percent value converts against (PSS/E SBASE, MATPOWER
+    baseMVA), so declare it before them. One without a basePower, or a second
+    one with a different basePower, raises: either would leave pu values
+    silently on the wrong base."""
+    base_power_cls = getattr(network.cim, 'BasePower', None)
+    if base_power_cls is not None and isinstance(obj, base_power_cls):
+        if obj.basePower is None:
+            raise ValueError(f"BasePower {obj.mRID!r} has no basePower")
+        for other in network.graph.get(base_power_cls, {}).values():
+            if not math.isclose(other.basePower.to('VA'), obj.basePower.to('VA')):
+                raise ValueError(
+                    f"BasePower {obj.mRID!r} ({obj.basePower.to('MVA')} MVA) disagrees with "
+                    f"BasePower {other.mRID!r} ({other.basePower.to('MVA')} MVA): a model has one system base"
+                )
+        network.base_power = obj.basePower
     network.add_to_graph(obj)
 
 

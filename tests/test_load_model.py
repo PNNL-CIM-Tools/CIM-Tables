@@ -112,3 +112,12 @@ def test_load_text_rejects_an_import():
     network = NodeBreakerModel(container=None, connection=None, distributed=False)
     with pytest.raises(ValueError, match=r"Import 'lines.cimtbl' needs a file"):
         cimtables.load_text('Import lines.cimtbl\n', network)
+
+
+def test_feeder_model_keeps_the_files_base_power(tmp_path):
+    network = cimtables.load_model(_write(tmp_path, (
+        'Object BasePower: mRID=sbase, basePower (MVA)=50\n'
+        'Object Feeder: mRID=fdr\n'
+    )))
+    assert isinstance(network, FeederModel)
+    assert network.base_power.to('MVA') == pytest.approx(50)
