@@ -38,6 +38,11 @@ T = TypeVar("T")
 # imported, so the cache never goes stale; callers must not mutate the dict.
 type_hints = functools.cache(typing.get_type_hints)
 
+# A CIMUnit class's SI unit name ('ohm', 'S', ...), once per class: `unit` is an
+# instance property, and building a throwaway instance (a pint Quantity) per
+# value doubled the pint work of every (unit) cell.
+_si_unit_name = functools.cache(lambda cim_unit_type: cim_unit_type(0).unit.name)
+
 
 def _part_field(part: ModuleType, obj: object, attr: str) -> dataclasses.Field:
     """The dataclasses.Field for `attr` on part's class of the same name as
@@ -122,7 +127,7 @@ def set_attr(
             raise ValueError(
                 f"{where} is not a CIMUnit-typed attribute, but got a Qty ({attribute_value!r})"
             )
-        unit_name = cim_unit_type(0).unit.name
+        unit_name = _si_unit_name(cim_unit_type)
         if cim_unit_type.__name__ == "PerCent":
             # PerCent holds the percent number itself (5 % -> 5.0, written as
             # 5 in CIM XML); pint would scale 'percent' to the fraction 0.05

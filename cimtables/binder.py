@@ -149,7 +149,7 @@ def _bind_row(network: GraphModel, row: object, obj: object, container: object, 
         else:
             graph_write.set_attr(obj, network.cim, f.name, value)
 
-    # FKs first: a TransformerEnd's terminal goes on its PowerTransformer
+    # FKs first: a TransformerEnd's terminal goes on its PowerTransformer / AutoTransformer
     for attr, mRID in deferred_fks:
         target_cls_name = validate.reference_target_class(row_cls_name, attr)
         # The slot's range is often an abstract base (TransformerEnd, PerLengthImpedance)

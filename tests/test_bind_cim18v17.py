@@ -105,6 +105,38 @@ def test_transformer_end_node_needs_its_power_transformer(network):
         ))
 
 
+def test_auto_transformer_end_node_and_phase_go_on_auto_transformer_terminal(network, cim):
+    _bind_text(network, (
+        'Object VoltageRegulator: mRID=vr_1, construction=typeA\n'
+        'Table AutoTransformerEnd: mRID, node, phase, endNumber, AutoTransformer\n'
+        '    vr_1_end1, 650,  AN, 1, vr_1\n'
+        '    vr_1_end2, rg60, AN, 2, vr_1\n'
+    ))
+    regulator = graph_write.resolve(network, cim.VoltageRegulator, 'vr_1')
+    assert [(t.mRID, t.sequenceNumber, t.phases.value, t.ConnectivityNode.mRID) for t in regulator.Terminals] == [
+        ('vr_1_T1', 1, 'AN', '650'), ('vr_1_T2', 2, 'AN', 'rg60'),
+    ]
+    end2 = graph_write.resolve(network, cim.AutoTransformerEnd, 'vr_1_end2')
+    assert end2.Terminal is regulator.Terminals[1] and end2.phase.value == 'AN'
+
+
+def test_auto_transformer_end_node_needs_its_auto_transformer(network):
+    with pytest.raises(ValueError, match='AutoTransformerEnd needs its AutoTransformer'):
+        _bind_text(network, (
+            'Table AutoTransformerEnd: mRID, node, endNumber\n'
+            '    orphan_1, 650, 1\n'
+        ))
+
+
+def test_auto_transformer_end_takes_phase_not_phases(network):
+    with pytest.raises(ValueError, match='real phase attribute'):
+        _bind_text(network, (
+            'Object VoltageRegulator: mRID=vr_1\n'
+            'Table AutoTransformerEnd: mRID, node, phases, endNumber, AutoTransformer\n'
+            '    vr_1_end1, 650, AN, 1, vr_1\n'
+        ))
+
+
 def test_identity_only_rows_are_keyed_by_optional_identifier(network, cim):
     # PhaseImpedanceData is not an IdentifiedObject: no mRID, and nothing references it
     _, keyed, unkeyed = _bind_text(network, (

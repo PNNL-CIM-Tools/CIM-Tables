@@ -52,6 +52,17 @@ def _resolve_node(network: GraphModel, col_name: str, node_mrid: str,
     return node_obj
 
 
+def _end_owner_field(cim: CN, end: CN.TransformerEnd) -> str:
+    """The end's reference to the ConductingEquipment its Terminal belongs to:
+    'PowerTransformer' on a PowerTransformerEnd, 'AutoTransformer' on an
+    AutoTransformerEnd. Found from the type hints, not a per-class table."""
+    for field_name, hint in graph_write.type_hints(type(end)).items():
+        for arg in typing.get_args(hint) or (hint,):
+            if isinstance(arg, type) and issubclass(arg, cim.ConductingEquipment):
+                return field_name
+    raise ValueError(f"{end.mRID!r}: {type(end).__name__} has no ConductingEquipment reference to put a Terminal on")
+
+
 def add_connectivity(network: GraphModel, equipment: CN.ConductingEquipment|CN.TransformerEnd, *,
                      node_cols: dict[str, str] | None = None, bus_cols: dict[str, str] | None = None,
                      equipment_container: CN.EquipmentContainer | None = None) -> list[CN.Terminal]:
@@ -67,13 +78,15 @@ def add_connectivity(network: GraphModel, equipment: CN.ConductingEquipment|CN.T
     Returns Terminals in sequenceNumber order.
 
     A TransformerEnd takes one terminal's worth (a node and/or a bus): the
-    Terminal belongs to the end's PowerTransformer (the ConductingEquipment),
-    sequenceNumber = endNumber, and end.Terminal points at it. The
-    PowerTransformer FK must already be set.
+    Terminal belongs to the equipment the end references (PowerTransformerEnd.
+    PowerTransformer, AutoTransformerEnd.AutoTransformer), sequenceNumber =
+    endNumber, and end.Terminal points at it. That reference must already be
+    set. An end with a real PhaseCode `phase` (AutoTransformerEnd) gives its
+    Terminal the same phases.
 
     Sets equipment.EquipmentContainer from `equipment_container`, falling back
-    to network.container when not given (a TransformerEnd's nodes take the
-    PowerTransformer's container instead). Propagates the same container
+    to network.container when not given (a TransformerEnd's nodes take its
+    transformer's container instead). Propagates the same container
     onto every node touched (ConnectivityNodeContainer), without overwriting
     one already set."""
     cim:CN = network.cim # type:ignore
@@ -93,10 +106,11 @@ def add_connectivity(network: GraphModel, equipment: CN.ConductingEquipment|CN.T
 
     is_end = isinstance(equipment, cim.TransformerEnd)
     if is_end:
-        transformer = getattr(equipment, 'PowerTransformer', None)
+        owner_field = _end_owner_field(cim, equipment)
+        transformer = getattr(equipment, owner_field)
         if transformer is None or equipment.endNumber is None:
             raise ValueError(
-                f"{equipment.mRID!r}: a node/bus column on a TransformerEnd needs its PowerTransformer and endNumber"
+                f"{equipment.mRID!r}: a node/bus column on a {type(equipment).__name__} needs its {owner_field} and endNumber"
             )
         if len(nodes_by_sequence) != 1:
             raise ValueError(
@@ -124,6 +138,9 @@ def add_connectivity(network: GraphModel, equipment: CN.ConductingEquipment|CN.T
 
     if is_end:
         graph_write.set_assc(equipment, cim, 'Terminal', terminals[0])
+        end_phase = getattr(equipment, 'phase', None)
+        if isinstance(end_phase, cim.PhaseCode):
+            graph_write.set_attr(terminals[0], cim, 'phases', end_phase)
     elif has_container:
         graph_write.set_assc(equipment, cim, 'EquipmentContainer', container)
     return terminals
@@ -189,6 +206,8 @@ def add_phase_children(network: GraphModel, obj: CN.ConductingEquipment, termina
         raise ValueError(f"{obj.mRID!r}: a phases column needs a node/bus column to put the phases on")
     if phases is not None and (phaseSide1 is not None or phaseSide2 is not None):
         raise ValueError(f"{obj.mRID!r}: give either phases or phaseSide1/phaseSide2, not both")
+    if isinstance(obj, cim.TransformerEnd) and 'phase' in graph_write.type_hints(type(obj)):
+        raise ValueError(f"{obj.mRID!r}: {type(obj).__name__} has a real phase attribute; its Terminal takes that, not a phases column")
     if phases is not None:
         tokens = side2_tokens = parse_phases(phases)
         for terminal in terminals:

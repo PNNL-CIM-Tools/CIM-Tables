@@ -176,12 +176,13 @@ prefix rule would capture real attributes such as `TopologicalNode.busName`.
   node-breaker substation data does.
 - A node or bus that was never declared is created on first use, with the cell value as its mRID.
 - Terminals are named `<mRID>_T<n>`.
-- A `TransformerEnd` row's `node`/`bus` puts its Terminal on the end's `PowerTransformer`, with
-  `sequenceNumber = endNumber`, and points `end.Terminal` at it. The `PowerTransformer` reference and `endNumber`
-  must be set.
+- A `TransformerEnd` row's `node`/`bus` puts its Terminal on the end's transformer, with
+  `sequenceNumber = endNumber`, and points `end.Terminal` at it. The transformer is the end's one
+  ConductingEquipment reference, found by type hint: `PowerTransformerEnd.PowerTransformer`,
+  `AutoTransformerEnd.AutoTransformer`. That reference and `endNumber` must be set.
 - **Containers.** The equipment's `EquipmentContainer` is the row's own column, else the container
   `bind_row` was given, else `network.container`. Every node touched gets that container as its
-  `ConnectivityNodeContainer` unless it already has one. A TransformerEnd's nodes take the PowerTransformer's
+  `ConnectivityNodeContainer` unless it already has one. A TransformerEnd's nodes take its transformer's
   container.
 
 A real CIM attribute of the same name always wins over a DSL column.
@@ -202,7 +203,10 @@ impedance matrix's row order.
 - **Switches whose sides differ** take `phaseSide1=AB, phaseSide2=AC` instead of `phases`. The sides pair by
   position (A→A, B→C) and each Terminal gets its own side's PhaseCode. On a class whose child has a single
   `phase`, differing sides raise.
-- A `TransformerEnd`'s phases go on its Terminal only.
+- A `TransformerEnd`'s phases go on its Terminal only. An `AutoTransformerEnd` has a real `phase` (a PhaseCode),
+  so it takes `phase` instead of `phases`, and its Terminal gets the same PhaseCode; a `phases` column on it
+  raises. The `VoltageRegulator` itself has no per-phase child class, so `phases` on it raises (a delta bank
+  would be the case that needs one).
 - The shorthand applies only where the class has no real `phases` attribute. `Terminal.phases` and
   `EnergyConsumerPhase.phases` are set literally.
 

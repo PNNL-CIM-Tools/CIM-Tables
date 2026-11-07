@@ -170,10 +170,10 @@ def test_xfm1_xfo_catalog_loads():
             Column('percentMagnetizingCurrent'), Column('noLoadLoss', 'kW'),
         ], [Row(['xc_XFM1_XFO', 'XFM1_XFO', 'XFM1_XFO', '2.2825', '0.0', '0.0'])]),
         Table('TransformerTankEnd', [
-            Column('mRID'), Column('endNumber'), Column('phases'), Column('connectionKind'), Column('grounded'),
+            Column('mRID'), Column('endNumber'), Column('connectionKind'), Column('grounded'),
             Column('rground', 'ohm'), Column('xground', 'ohm'), Column('TankConfiguration'),
-        ], [Row([f'xc_XFM1_XFO_end_{n}', str(n), 'ABCN', 'Yn', 'true', '0.0', '0.0', 'xc_XFM1_XFO']) for n in (1, 2)],
-            comment='TransformerConnection Yg_Yg -> one end per side; TransfoType ThreePhase + Yg -> ABCN'),
+        ], [Row([f'xc_XFM1_XFO_end_{n}', str(n), 'Yn', 'true', '0.0', '0.0', 'xc_XFM1_XFO']) for n in (1, 2)],
+            comment='TransformerConnection Yg_Yg -> one end per side'),
         Table('TransformerWinding', [
             Column('mRID'), Column('ratedU', 'kV'), Column('baseU', 'kV'), Column('ratedS', 'kVA'), Column('baseS', 'kVA'),
             Column('FromTransformerEnd'), Column('TankConfiguration'),

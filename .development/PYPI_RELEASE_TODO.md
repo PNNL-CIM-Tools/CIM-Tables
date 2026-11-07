@@ -107,8 +107,18 @@ Audit of `rc1` @ 21c41f7 (2026-11-06). State: 223 tests pass on Python 3.10 and 
 
 ## P3: nice to have
 
-- [ ] Performance: IEEE13_OCHRE (838 objects) takes 0.69 s in `load_model`, ~0.8 ms/object, so a 100k-object
+- [x] (done 2026-11-07: the `get_type_hints` caching was already in (`graph_write.type_hints`,
+      `validate._real_fields`); the 0.8 ms/object was a cold first load. Measured warm: IEEE13_OCHRE 0.07 s,
+      a generated 48k-object feeder 2.3 s, 192k objects 10.5 s, i.e. linear at ~50 µs/object, and no memory
+      retained across repeated loads. Fixed the one remaining waste: `set_attr` built a throwaway CIMUnit per
+      `(unit)` cell just to read its unit name, now cached per class (`_si_unit_name`), 11-16 % faster.
+      What's left is upstream or inherent: lark parsing ~27 %, pint ~25 %, cimprofiles' seeded UUID ~16 %
+      (`model_authority_namespace` recomputes a uuid5 per object; cacheable there), cim-graph's
+      `_object_count` on every `add_to_graph`/`mrid_index` call ~6 % (O(classes) per call, not quadratic),
+      and Python's cyclic GC ~20 % on big models (a caller can `gc.disable()`/`gc.freeze()` around a huge
+      load; the library shouldn't flip process-global GC).) Performance: IEEE13_OCHRE (838 objects) takes 0.69 s in `load_model`, ~0.8 ms/object, so a 100k-object
       transmission model would take ~80 s. `typing.get_type_hints` is recomputed on every `set_attr` /
       `_real_fields` / `_parent_assoc_field` call. Cache it per class (`functools.cache`).
-- [ ] `import cimtables` takes ~1 s, mostly cim-graph's model imports. Lark's `cache=True` could trim the
+- [x] (checked: the grammar builds in 12 ms, so lark's `cache=True` isn't worth it; 0.58 s of the 0.77 s is
+      `cimgraph.models`, via its SPARQL database imports, for cim-graph to make lazy) `import cimtables` takes ~1 s, mostly cim-graph's model imports. Lark's `cache=True` could trim the
       grammar build.
