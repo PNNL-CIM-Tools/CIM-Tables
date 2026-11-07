@@ -38,7 +38,7 @@ from cimtables.units import Qty
 from cimtables import graph_write, records, synthetic
 
 _row_dataclasses: dict[tuple[str, str], type] = {}
-_SKIP_FIELDS = {'mRID', 'identifier'}
+KEY_FIELDS = ('mRID', 'identifier')  # a row's key, never set as an attribute
 
 
 class CimtblValidationError(ValueError):
@@ -110,7 +110,7 @@ def _real_fields(cim_cls: type) -> dict[str, tuple[str, type]]:
     hints = graph_write.type_hints(cim_cls)
     classified = {}
     for field in dataclasses.fields(cim_cls):
-        if field.name in _SKIP_FIELDS or field.metadata.get('serialize') is False:
+        if field.name in KEY_FIELDS or field.metadata.get('serialize') is False:
             continue
         classified[field.name] = _classify(hints[field.name])
     return classified

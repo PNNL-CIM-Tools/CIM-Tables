@@ -15,19 +15,19 @@ from importlib.metadata import version
 from cimgraph.core import get_cim_profile, get_model_authority, get_model_name, set_model_scope
 from cimgraph.models import BusBranchModel, FeederModel, GraphModel, NodeBreakerModel
 
-from cimtables import connectivity, document, graph_write, synthetic, validate
+from cimtables import connectivity, document, graph_write, impedance, synthetic, validate
 from cimtables.binder import CimtblBindError, bind_row
 from cimtables.diff import diff_models
 from cimtables.parser import CimtblParseError, Header, parse_file, parse_text
-from cimtables.records import RawRecord
+from cimtables.records import ImportRecord, RawRecord
 from cimtables.units import Qty
 from cimtables.validate import CimtblValidationError
 
 __version__ = version('cimtables')
 
 __all__ = [
-    'bind_row', 'connectivity', 'document', 'graph_write', 'synthetic', 'validate',
-    'Header', 'parse_file', 'parse_text', 'RawRecord', 'Qty',
+    'bind_row', 'connectivity', 'document', 'graph_write', 'impedance', 'synthetic', 'validate',
+    'Header', 'parse_file', 'parse_text', 'ImportRecord', 'RawRecord', 'Qty',
     'CimtblParseError', 'CimtblValidationError', 'CimtblBindError', 'diff_models', 'load', 'load_text', 'load_model',
 ]
 
@@ -50,8 +50,8 @@ def load_text(text: str, network, source_file: str = '<text>'):
     need a file to resolve against, so they raise here - use load()."""
     records, header = parse_text(text, source_file=source_file)
     for record in records:
-        if record.cim_class == '__import__':
-            raise ValueError(f"{source_file}: Import {record.fields['path']!r} needs a file; use load(path, network)")
+        if isinstance(record, ImportRecord):
+            raise ValueError(f"{source_file}:{record.source_line}: Import {record.path!r} needs a file; use load(path, network)")
     return _bind_records(network, records, header, source_file)
 
 

@@ -5,13 +5,17 @@ and the phases shorthand. bind_row and every builder's add_connectivity call
 these two functions - no per-class node-vs-bus or phase logic anywhere else.
 """
 
+from __future__ import annotations
+
 import re
 import typing
 
-import cimprofiles.cim18.cim18v17.connectivity_unbalanced as CN
 from cimgraph.models import GraphModel
 
 from cimtables import graph_write, synthetic
+
+if typing.TYPE_CHECKING:  # annotations only: the code reflects on network.cim, whatever its profile
+    import cimprofiles.cim18.cim18v17.connectivity_unbalanced as CN
 
 
 def _parent_assoc_field(phase_cls: type, parent: object) -> str:

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import lark
 
-from cimtables.records import RawRecord
+from cimtables.records import ImportRecord, RawRecord
 
 _GRAMMAR_PATH = Path(__file__).parent / 'grammar.lark'
 _LARK_PARSER = lark.Lark(
@@ -67,9 +67,8 @@ _HEADER_STATEMENTS = {'profile_stmt': 'profile', 'authority_stmt': 'authority', 
 class _RecordBuilder(lark.Transformer):
     """Parse tree -> flat list[RawRecord]. Table statements expand
     to one RawRecord per data row, sharing that table's cim_class/units;
-    Object statements become exactly one RawRecord. Import/Profile
-    statements are handled by the driver functions below, not here - they
-    never become RawRecords themselves."""
+    Object statements become exactly one RawRecord. Import and settings
+    statements are handled by parse_text, not here."""
 
     def __init__(self, source_file: str):
         super().__init__()
@@ -155,18 +154,20 @@ def _ensure_trailing_newline(text: str) -> str:
     return text if text.endswith('\n') else text + '\n'
 
 
-def parse_text(text: str, source_file: str = '<text>') -> tuple[list[RawRecord], Header]:
+def parse_text(text: str, source_file: str = '<text>') -> tuple[list[RawRecord | ImportRecord], Header]:
     """Parse `.cimtbl` source already in memory. Returns (records, header)
     - `header` holds the file's own Profile/Authority/Model statements.
     Import statements are NOT resolved here (no filesystem access at this
-    layer); use parse_file for a real file that may contain them."""
+    layer): each comes back in place as an ImportRecord. Use parse_file for a
+    real file that may contain them."""
     try:
         tree = _LARK_PARSER.parse(_ensure_trailing_newline(text))
     except lark.exceptions.UnexpectedInput as exc:
         raise CimtblParseError(f'{source_file}:{exc.line}:{exc.column}: {exc}') from exc
 
     header = Header()
-    statements: list[lark.Tree | tuple[str, str, int]] = []
+    builder = _RecordBuilder(source_file)
+    records: list[RawRecord | ImportRecord] = []
     for statement in tree.children:
         node = statement.children[0]
         if node.data in _HEADER_STATEMENTS:
@@ -176,27 +177,16 @@ def parse_text(text: str, source_file: str = '<text>') -> tuple[list[RawRecord],
             header = replace(header, **{setting: str(node.children[1]).strip()})
             continue
         if node.data == 'import_stmt':
-            statements.append(('__import__', str(node.children[1]), node.meta.line))
+            records.append(ImportRecord(str(node.children[1]), source_file, node.meta.line))
             continue
-        statements.append(node)
-
-    builder = _RecordBuilder(source_file)
-    records: list[RawRecord] = []
-    for item in statements:
-        if isinstance(item, tuple):
-            records.append(RawRecord(
-                form='Table', cim_class='__import__', fields={'path': item[1]}, units={},
-                source_file=source_file, source_line=item[2],
-            ))
+        try:
+            built = builder.transform(node)
+        except lark.exceptions.VisitError as exc:  # lark wraps what a transformer method raises
+            raise exc.orig_exc from None
+        if isinstance(built, list):
+            records.extend(built)
         else:
-            try:
-                built = builder.transform(item)
-            except lark.exceptions.VisitError as exc:  # lark wraps what a transformer method raises
-                raise exc.orig_exc from None
-            if isinstance(built, list):
-                records.extend(built)
-            else:
-                records.append(built)
+            records.append(built)
     return records, header
 
 
@@ -244,9 +234,9 @@ def _parse_file(path: Path, importers: tuple[Path, ...]) -> tuple[list[RawRecord
 
     records: list[RawRecord] = []
     for record in raw_records:
-        if record.cim_class == '__import__':
-            import_path = path.parent / record.fields['path']
-            where = f"{path}:{record.source_line}: Import {record.fields['path']!r}"
+        if isinstance(record, ImportRecord):
+            import_path = path.parent / record.path
+            where = f"{path}:{record.source_line}: Import {record.path!r}"
             if not import_path.is_file():
                 raise CimtblParseError(f"{where}: {import_path} not found")
             resolved = import_path.resolve()

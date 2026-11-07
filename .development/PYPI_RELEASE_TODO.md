@@ -75,23 +75,24 @@ Audit of `rc1` @ 21c41f7 (2026-11-06). State: 223 tests pass on Python 3.10 and 
       through `cimprofiles.profile_module`, like cim-graph's `get_cim_profile`.
 - [ ] Tell CIMHub (CIMTABLES_REQUESTS.md): bind errors are now `CimtblBindError` (still a `ValueError`) prefixed
       `file:line: `; Import mismatches are `CimtblParseError` with the new message
-      `<file>:<line>: Import 'x': Model mismatch: ...`.
+      `<file>:<line>: Import 'x': Model mismatch: ...`; `parse_text` returns an `Import` as an `ImportRecord` (`.path`),
+      not a `RawRecord` with `cim_class='__import__'`, so `cimhub_core.cimtbl_testing._keyed_records` must handle it.
 
 ## P2: API cleanup (decide before the names are on PyPI)
 
-- [ ] **The `__import__` sentinel leaks out of the public `parse_text`.** Import statements come back as a
+- [x] (done: `records.ImportRecord(path, source_file, source_line)`, returned in place by `parse_text`) **The `__import__` sentinel leaks out of the public `parse_text`.** Import statements come back as a
       `RawRecord(form='Table', cim_class='__import__')`, so the `form: Literal['Object','Table']` type is
       wrong, and `load_text` has to know the magic name. Use a separate `ImportRecord` type, or return the
       imports separately.
-- [ ] Define the public surface. `__all__` lists `synthetic`/`validate` but leaves out `impedance` and
+- [x] (done: `impedance` and `ImportRecord` added to `__all__`; `document` was already there) Define the public surface. `__all__` lists `synthetic`/`validate` but leaves out `impedance` and
       `document`, which downstream code does use (`cimtables.impedance.z_base`, `cimtables.document.*`,
       `graph_write.set_assc_from_mrid`, `connectivity`). Add what's public and underscore or document the rest.
-- [ ] `connectivity.py` imports `cimprofiles.cim18.cim18v17.connectivity_unbalanced as CN` at runtime only for
+- [x] (done) `connectivity.py` imports `cimprofiles.cim18.cim18v17.connectivity_unbalanced as CN` at runtime only for
       type hints. That ties a profile-agnostic module to one profile's internal path. Move it under
       `TYPE_CHECKING` (with `from __future__ import annotations`) and drop `cim: CN = network.cim  # type:ignore`.
-- [ ] `writer.py` is a one-line docstring stub. Remove it before release (re-add with the implementation) so
+- [x] (done; the design doc keeps the planned writer) `writer.py` is a one-line docstring stub. Remove it before release (re-add with the implementation) so
       it isn't shipped as an empty public module.
-- [ ] Minor: `_SKIP_FIELDS` is duplicated in `binder`/`validate`; `graph_write._set_side` tests list-ness with
+- [x] (done: `validate.KEY_FIELDS`; `_set_side` checks the current value; `type[T]`) Minor: `_SKIP_FIELDS` is duplicated in `binder`/`validate`; `graph_write._set_side` tests list-ness with
       `"list" in field.type` (only works because cim-graph annotations are strings); `graph_write` still uses
       `typing.Type`/`TypeVar` where `type[T]` would do.
 

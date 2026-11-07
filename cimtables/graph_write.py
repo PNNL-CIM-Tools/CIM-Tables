@@ -23,7 +23,7 @@ import functools
 import math
 import typing
 from types import ModuleType
-from typing import Type, TypeVar
+from typing import TypeVar
 
 from cimgraph.models import GraphModel
 from cimprofiles.units.units import CIMUnit
@@ -205,14 +205,14 @@ def get_qty(
     return value.to(unit)
 
 
-def _set_side(obj: object, attr: str, field: dataclasses.Field, target: object, *, known_new: bool = False) -> None:
+def _set_side(obj: object, attr: str, target: object, *, known_new: bool = False) -> None:
     """One side of an association write - list-append (dedup by identity,
     matching cimgraph's own create_edge, unless the caller knows target is
-    not on the list yet) or singular overwrite, per field.type."""
-    if "list" in field.type:
-        obj_list = getattr(obj, attr)
-        if known_new or not any(x is target for x in obj_list):
-            obj_list.append(target)
+    not on the list yet) or singular overwrite, by the field's current value."""
+    current = getattr(obj, attr)
+    if isinstance(current, list):
+        if known_new or not any(x is target for x in current):
+            current.append(target)
     else:
         setattr(obj, attr, target)
 
@@ -234,16 +234,16 @@ def set_assc(obj: object, part: ModuleType, assc: str, target: object) -> object
             f"(not an association) - use set_attr, not set_assc"
         )
 
-    reverse_cls_name, reverse_attr = inverse.split(".")
-    reverse_field = getattr(part, reverse_cls_name).__dataclass_fields__[reverse_attr]
+    reverse_attr = inverse.split(".")[1]
 
     # A singular side that did not already point at target means obj is not
     # on target's reverse list yet, so skip its O(n) dedup scan: those lists
     # (BaseVoltage.ConductingEquipment, Feeder.Equipments) grow with the model
-    reverse_known_new = "list" not in field.type and getattr(obj, assc) is not target
-    _set_side(obj, assc, field, target)
+    current = getattr(obj, assc)
+    reverse_known_new = not isinstance(current, list) and current is not target
+    _set_side(obj, assc, target)
     if target is not None:
-        _set_side(target, reverse_attr, reverse_field, obj, known_new=reverse_known_new)
+        _set_side(target, reverse_attr, obj, known_new=reverse_known_new)
     return target
 
 
@@ -289,7 +289,7 @@ def set_assc_from_mrid(
     source_object: object,
     profile_part: ModuleType,
     association_name: str,
-    target_class: Type[T],
+    target_class: type[T],
     target_mRID: str | None,
 ) -> T:
     """resolve() + set_assc() in one call, for the common required-FK shape

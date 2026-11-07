@@ -235,6 +235,12 @@ def test_setting_declared_twice_raises():
         _parse('Model = a\nModel = b\n')
 
 
+def test_parse_text_returns_an_unresolved_import_in_place():
+    records, _ = _parse('Object Substation: mRID=a\nImport lines.cimtbl\nObject Substation: mRID=b\n')
+    assert [type(r).__name__ for r in records] == ['RawRecord', 'ImportRecord', 'RawRecord']
+    assert records[1] == parser.ImportRecord('lines.cimtbl', '<test>', 2)
+
+
 def test_import_model_mismatch_raises(tmp_path):
     (tmp_path / 'catalog.cimtbl').write_text('Model = catalog\n')
     (tmp_path / 'main.cimtbl').write_text('Model = ieee13\nImport catalog.cimtbl\n')

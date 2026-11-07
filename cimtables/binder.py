@@ -44,7 +44,7 @@ from cimgraph.models import GraphModel
 from cimtables import connectivity, graph_write, synthetic, validate
 from cimtables.units import Qty
 
-_SKIP_FIELDS = {'mRID', 'identifier', 'source_file', 'source_line'}
+_SKIP_FIELDS = {*validate.KEY_FIELDS, 'source_file', 'source_line'}
 _CONTAINER_FIELD = 'EquipmentContainer'
 
 

@@ -43,7 +43,7 @@ cimprofiles  →  cim-graph  →  cimtables  →  cimbuilder
 | Module | Role |
 |---|---|
 | `grammar.lark`, `parser.py` | The fixed grammar; text → `RawRecord`s plus a `Header` of settings; resolves `Import`. |
-| `records.py` | `RawRecord`: one row, every cell still `str` or `None`, plus units and source file/line. |
+| `records.py` | `RawRecord`: one row, every cell still `str` or `None`, plus units and source file/line. `ImportRecord`: an `Import` as `parse_text` returns it, before `parse_file` splices the file in. |
 | `validate.py` | Reflects on the CIM profile to build a `<Class>Row` dataclass; coerces cells; raises before any graph change. |
 | `synthetic.py` | The only non-reflective vocabulary: the DSL's connectivity and phase columns. |
 | `binder.py` | `bind_row`: one validated row → one live object, classifying every field from the profile alone. |
@@ -52,7 +52,6 @@ cimprofiles  →  cim-graph  →  cimtables  →  cimbuilder
 | `impedance.py` | The base for pu/percent impedances. |
 | `units.py` | `Qty(value, unit, base)`, the carrier for a `(unit)` column. |
 | `document.py` | The parser's inverse: a `Document` of cell text → deterministic `.cimtbl` text. |
-| `writer.py` | cim-graph → `.cimtbl`. Not implemented yet. |
 
 ## Load-bearing decisions
 
@@ -381,7 +380,7 @@ returns the master's path. It writes nothing if a name repeats, an Import is unk
 
 ### The cim-graph → `.cimtbl` writer (not built yet)
 
-`writer.py` is a stub. The intended design:
+There is no writer module yet. The intended design:
 
 - **multi-file**, ordered by reference dependency (catalogs → templates → instances), so every file's references
   are declared by an earlier `Import`;
