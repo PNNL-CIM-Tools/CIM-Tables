@@ -234,7 +234,8 @@ The base is chosen by **class shape, never by which values happen to be set**:
 1. **A rated class** uses its own rating: the row's object if its class is rated (`PowerTransformerEnd`), else
    the target of one of its single-valued `From*` references (`TransformerMeshImpedance.FromWinding`). A class
    with `baseU`/`baseS` uses those (`TransformerWinding`: coil voltage, common tank kVA), otherwise
-   `ratedU`/`ratedS`. Both must be set.
+   `ratedU`/`ratedS`, each side on its own: `AutoTransformerEnd` has `baseU` but only `ratedS`, so it uses
+   `baseU`/`ratedS` (coil voltage, through rating). Both must be set.
 2. **Any other class** (`ACLineSegment`, `EnergySource`) uses the system base: its `BaseVoltage` (or `nomU`
    where the class has it) and the system base power.
 

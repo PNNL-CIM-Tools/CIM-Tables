@@ -40,6 +40,13 @@ def test_rated_ratings_on_a_class_without_base_ratings():
     assert impedance.z_base(end, _SYSTEM) == pytest.approx(12470 ** 2 / 200e3)
 
 
+def test_auto_transformer_end_uses_base_voltage_and_rated_power():
+    # AutoTransformerEnd has baseU (coil voltage) and ratedS (through rating), no ratedU/baseS
+    end = cim.AutoTransformerEnd(mRID='end', baseU=cim.Voltage(2400, 'V'), ratedS=cim.ApparentPower(1666, 'kVA'))
+    mesh = cim.TransformerMeshImpedance(mRID='mesh', FromTransformerEnd=end)
+    assert impedance.z_base(mesh, _SYSTEM) == pytest.approx(2400 ** 2 / 1666e3)
+
+
 def test_unrated_object_uses_from_target_rating():
     from_end = cim.PowerTransformerEnd(mRID='end', ratedU=cim.Voltage(4160, 'V'), ratedS=cim.ApparentPower(500, 'kVA'))
     mesh = cim.TransformerMeshImpedance(mRID='mesh', FromTransformerEnd=from_end)

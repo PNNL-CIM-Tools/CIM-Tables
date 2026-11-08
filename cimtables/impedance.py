@@ -16,10 +16,11 @@ def z_base(obj: object, system_base: CIMUnit | Qty | float | None, *, on_system_
     1. obj itself, else the target of one of its From* references
        (TransformerMeshImpedance's FromWinding/FromTransformerEnd: CIM's "the
        'from' end ... determines the voltage reference"), if that class is
-       rated: baseU/baseS where the class has them (TransformerWinding: coil
-       voltage and per-coil kVA, e.g. ratedS/3 on a 3-phase coil, so no phase
-       count is needed here), else ratedU/ratedS (PowerTransformerEnd).
-       Both must be set.
+       rated: for each of U and S, the base attribute where the class has it,
+       else the rating - baseU/baseS on a TransformerWinding (coil voltage and
+       per-coil kVA, e.g. ratedS/3 on a 3-phase coil, so no phase count is
+       needed here), ratedU/ratedS on a PowerTransformerEnd, baseU/ratedS on an
+       AutoTransformerEnd (coil voltage, through rating). Both must be set.
     2. else the system base (ACLineSegment, EnergySource): obj's own
        BaseVoltage.nominalVoltage, or nomU where the class has it
        (ShuntCompensator; it must be set), and `system_base`, the system base
@@ -37,8 +38,11 @@ def z_base(obj: object, system_base: CIMUnit | Qty | float | None, *, on_system_
         if name.startswith('From') and target is not None and not isinstance(target, list):
             from_targets.append(target)
     for candidate in [] if on_system_base else [obj, *from_targets]:
-        u_attr, s_attr = ('baseU', 'baseS') if hasattr(candidate, 'baseU') else ('ratedU', 'ratedS')
-        if not hasattr(candidate, s_attr):
+        # each side: the base attribute where the class has one, else the rating
+        # (AutoTransformerEnd has baseU but only ratedS)
+        u_attr = 'baseU' if hasattr(candidate, 'baseU') else 'ratedU'
+        s_attr = 'baseS' if hasattr(candidate, 'baseS') else 'ratedS'
+        if not (hasattr(candidate, u_attr) and hasattr(candidate, s_attr)):
             continue
         u, s = getattr(candidate, u_attr), getattr(candidate, s_attr)
         if u is None or s is None:
