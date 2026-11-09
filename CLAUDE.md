@@ -21,6 +21,8 @@ uv run pytest tests/test_parser.py::test_name -q     # one test
 
 `pyproject.toml` `[tool.uv.sources]` points `cim-graph` and `cimprofiles` at sibling checkouts (`../CIM-Graph`, `../CIM-Profiles`), and `prerelease = "allow"` is required for their pre-release deps. Changes in those repos take effect here immediately.
 
+Releases follow CIM-Profiles' chain (`.github/workflows/release.yml`): `pyproject.toml`'s `version` is the next release *target* `X.Y.Z`, never an alpha; a push to `develop` publishes the next free `X.Y.ZaN` and a push to `main` publishes `X.Y.Z`, both derived from PyPI at build time and never committed (PyPI trusted publishing, then a GitHub release). CI installs cim-graph/cimprofiles from PyPI: every resolving uv call there takes `--no-sources`, and `uv version` writes with `--frozen`, because the sibling paths don't exist on a runner.
+
 ## Pipeline architecture
 
 ```

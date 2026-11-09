@@ -31,7 +31,8 @@ Audit of `rc1` @ 21c41f7 (2026-11-06). State: 223 tests pass on Python 3.10 and 
       CLAUDE.md's `uv sync --extra dev`.
 - [x] `pre-commit` is a dev dep but there's no `.pre-commit-config.yaml`. Add one (e.g. ruff) or drop the dep
       (done: dropped; add it back with a config when a linter is chosen).
-- [x] Pick the version: `0.1.0a1` is the natural choice while the deps are pre-release.
+- [x] Pick the version (done 2026-11-09: `pyproject.toml` holds the release target `0.1.0`; the release workflow
+      derives `0.1.0aN` on `develop` and `0.1.0` on `main` from PyPI, as CIM-Profiles does).
 - [x] PNNL release paperwork: confirm the copyright holder (`PNNL-CIM-Tools` vs Battelle Memorial Institute) and
       whether a DISCLAIMER/NOTICE file is required for a public PyPI release (done: Battelle Memorial Institute in
       LICENSE, PNNL's standard `DISCLAIMER.md`, both shipped as license files).
@@ -98,12 +99,24 @@ Audit of `rc1` @ 21c41f7 (2026-11-06). State: 223 tests pass on Python 3.10 and 
 
 ## P2: CI / release automation
 
-- [ ] There's no `.github/`. Add GitHub Actions: pytest on 3.10–3.13 with `uv sync --no-sources` (real PyPI
-      deps), `uv build`, and a test run against the *installed wheel*, not the source tree (catches missing
-      package data such as `grammar.lark`).
-- [ ] A tag-triggered publish job with PyPI trusted publishing (`uv publish`); dry-run to TestPyPI first.
-- [ ] Merge `rc1` → `main`, then tag `v0.1.0a1`.
-- [ ] Tests for the P1 fixes: import cycle, profile mismatch, non-ASCII round-trip, bind errors with `file:line`.
+- [x] (done 2026-11-09: CIM-Profiles' chain, `.github/workflows/release.yml` + `tests.yml`, `dependabot.yml`,
+      `.github/scripts/raise_security_floors.py`; CI takes cim-graph/cimprofiles from PyPI with `--no-sources`.
+      Simulated without sibling checkouts: version derivation for each PyPI state, `uv build`, and 296 tests on
+      Python 3.10 against wheels of the local cim-graph 0.6.0a1 / cimprofiles 0.1.0. Like CIM-Profiles it tests
+      3.10 only, from the source tree, not the installed wheel.) Add GitHub Actions: pytest on 3.10–3.13 with
+      `uv sync --no-sources` (real PyPI deps), `uv build`, and a test run against the *installed wheel*.
+- [x] (done: branch-triggered instead of tag-triggered, with PyPI trusted publishing and a GitHub release + tag
+      per version) A tag-triggered publish job with PyPI trusted publishing.
+- [ ] One-time setup, by hand: a PyPI *pending* trusted publisher for `cimtables` (owner PNNL-CIM-Tools, repo
+      CIM-Tables, workflow `release.yml`, environment `pypi`); a GitHub environment `pypi`; `develop` as the
+      default branch (Dependabot needs it); "Allow GitHub Actions to create and approve pull requests" (the
+      Dependabot auto-merge).
+- [ ] Release: merge `rc1` → `develop` (publishes `0.1.0a1` once cim-graph 0.6 and cimprofiles are on PyPI), then
+      `develop` → `main` for `0.1.0`.
+- [ ] Dependabot's `uv` updates may fail while `[tool.uv.sources]` points at sibling paths it can't see; drop the
+      sources block once cim-graph/cimprofiles are on PyPI if so (the same note as CIM-Graph's CI).
+- [x] (already covered: `test_parser.py` import cycle/self-import and UTF-8 read, `test_load_model.py` profile
+      mismatch and bind errors with `file:line`, `test_document.py` UTF-8/LF write) Tests for the P1 fixes.
 
 ## P3: nice to have
 

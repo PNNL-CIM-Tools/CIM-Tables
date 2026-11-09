@@ -1,6 +1,6 @@
 [project]
 name = "cimtables"
-version = "0.1.0a1"
+version = "0.1.0"
 description = "The .cimtbl DSL: parser, profile-reflective validator, and graph-write/binder core for cim-graph"
 authors = [
     {name = "A. Anderson", email = "19935503+AAndersn@users.noreply.github.com"},
