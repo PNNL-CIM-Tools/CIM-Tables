@@ -62,7 +62,7 @@ dev = [
 ]
 
 [[package]]
-name = "cimtables"
+name = "cim-tables"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
