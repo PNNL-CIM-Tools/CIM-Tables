@@ -150,10 +150,10 @@ first error: nothing is skipped and nothing is guessed.
 ## Installing
 
 ```
-pip install --pre cimtables
+pip install --pre cim-tables
 ```
 
-`cimtables` is an alpha release and depends on pre-release versions of `cim-graph` and `cimprofiles`, hence
+`cim-tables` (imported as `cimtables`) is an alpha release and depends on pre-release versions of `cim-graph` and `cim-profiles`, hence
 `--pre`. It needs Python 3.10 or newer.
 
 ## Using it from Python
