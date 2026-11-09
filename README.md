@@ -128,7 +128,8 @@ The whole format, briefly:
   share wire and transformer catalogs between models.
 - **The same class can appear in several tables** with different columns, for example lines given by
   impedance in one table and by catalog reference in another.
-- **Phases are written in conductor order**: `ABCN`, `CB`, `s1s2N`.
+- **Phases are written in conductor order**: `ABCN`, `CB`, `s1s2N`. Leave `phases` blank for a balanced
+  three-phase device: CIM reads a Terminal with no phases as ABC.
 
 The full format, including connectivity, phases, delta connections, relative impedance bases and the error
 rules, is in [docs/CIMTBL_DESIGN.md](https://github.com/PNNL-CIM-Tools/CIM-Tables/blob/main/docs/CIMTBL_DESIGN.md).

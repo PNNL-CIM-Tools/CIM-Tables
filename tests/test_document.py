@@ -3,14 +3,12 @@
 
 import os
 import random
-import tempfile
 
 import pytest
 
 os.environ['CIMG_CIM_PROFILE'] = 'cim18v17'
 
 import cimprofiles.cim18.cim18v17 as cim
-from cimgraph.databases import XMLFile
 from cimgraph.models import BusBranchModel
 
 import cimtables
@@ -188,7 +186,7 @@ def test_xfm1_xfo_catalog_loads():
                  '1.9999419087485364', 'xc_XFM1_XFO_wdg_1', 'xc_XFM1_XFO_wdg_2'])],
             comment='derived (CIM has no X/R): r = Z / sqrt(1 + XR^2), x = r * XR'),
     ], profile='cim18v17', comment='CYME TransformerDB -> TransformerTankConfiguration (catalog)')
-    network = BusBranchModel(connection=XMLFile(filename=tempfile.mktemp(suffix='.xml')),
+    network = BusBranchModel(connection=None,
                              container=cim.Feeder(mRID='f'), distributed=False)
     bound = cimtables.load_text(format_document(document), network)
     assert len(bound) == 7

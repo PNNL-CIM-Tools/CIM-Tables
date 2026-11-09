@@ -3,14 +3,12 @@ PerCent attributes holding the percent number (CIMHub R14)."""
 
 import os
 import re
-import tempfile
 
 import pytest
 
 os.environ['CIMG_CIM_PROFILE'] = 'cim18v17'
 
 import cimprofiles.cim18.cim18v17 as cim
-from cimgraph.databases import XMLFile
 from cimgraph.models import BusBranchModel
 from cimgraph.utils import write_xml
 
@@ -106,6 +104,33 @@ def test_get_qty_on_system_base_without_system_base_raises():
         graph_write.get_qty(line, 'r', 'pu')
 
 
+# --- U12: power_base, the same voltage on another power ---------------------
+
+def test_get_qty_power_base_moves_a_mesh_percent_to_another_kva():
+    mesh = _mesh()  # From winding: baseU 2400 V, baseS 500 kVA
+    graph_write.set_attr(mesh, cim, 'x', Qty(2.0, 'percent'))
+    # winding 1 at 1500 kVA: 3x the power on the same voltage triples the percent
+    assert graph_write.get_qty(mesh, 'x', 'percent', power_base=Qty(1500, 'kVA')) == pytest.approx(6.0)
+    assert graph_write.get_qty(mesh, 'x', 'percent', power_base=cim.ApparentPower(1.5, 'MVA')) == pytest.approx(6.0)
+
+
+def test_get_qty_power_base_moves_an_admittance_the_other_way():
+    end = _rated_end()  # ratedS 50 MVA
+    graph_write.set_attr(end, cim, 'g', Qty(0.3, 'percent'))
+    assert graph_write.get_qty(end, 'g', 'percent', power_base=150e6) == pytest.approx(0.1)
+
+
+def test_get_qty_power_base_replaces_the_system_power():
+    line = _line()
+    graph_write.set_attr(line, cim, 'x', Qty(0.059, 'pu'), system_base=_SYSTEM_BASE)
+    assert graph_write.get_qty(line, 'x', 'pu', power_base=Qty(50, 'MVA')) == pytest.approx(0.0295)
+
+
+def test_get_qty_power_base_on_a_non_relative_unit_raises():
+    with pytest.raises(ValueError, match='only pu/percent take a base or power_base'):
+        graph_write.get_qty(_rated_end(), 'ratedU', 'kV', power_base=Qty(1, 'MVA'))
+
+
 # --- R14: PerCent holds the percent number -----------------------------
 
 @pytest.mark.parametrize('value', [5, 5.0, Qty(5, 'percent'), Qty(5, '')])
@@ -123,7 +148,7 @@ def test_percent_attribute_rejects_other_units(qty):
 
 
 def test_percent_columns_bind_and_write_as_the_percent_number(tmp_path):
-    network = BusBranchModel(connection=XMLFile(filename=tempfile.mktemp(suffix='.xml')),
+    network = BusBranchModel(connection=None,
                              container=cim.Feeder(mRID='f'), distributed=False)
     cimtables.load_text(
         'Table TransformerTankConfiguration: mRID, percentImpedance (percent), percentMagnetizingCurrent\n'

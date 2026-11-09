@@ -4,14 +4,12 @@ TopologicalNode disambiguation on the line_1_2 sequence row.
 """
 
 import os
-import tempfile
 
 import pytest
 
 os.environ['CIMG_CIM_PROFILE'] = 'cim18v17'
 
 import cimprofiles.cim18.cim18v17 as cim
-from cimgraph.databases import XMLFile
 from cimgraph.models import BusBranchModel
 
 from cimtables import connectivity, graph_write
@@ -19,7 +17,7 @@ from cimtables import connectivity, graph_write
 
 @pytest.fixture
 def network():
-    conn = XMLFile(filename=tempfile.mktemp(suffix='.xml'))
+    conn = None  # in memory: cim-graph's XMLFile now raises on a missing file
     container = cim.Feeder(mRID='test_feeder')
     net = BusBranchModel(connection=conn, container=container, distributed=False)
     return net

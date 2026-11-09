@@ -169,6 +169,7 @@ def get_qty(
     *,
     base: str | None = None,
     system_base: CIMUnit | Qty | float | None = None,
+    power_base: CIMUnit | Qty | float | None = None,
 ) -> float | None:
     """The read-side mirror of set_attr: a CIMUnit attribute's value in
     `unit` ('kV', 'ohm/mile', 'MVAr'), or None if it is unset.
@@ -176,7 +177,10 @@ def get_qty(
     'pu'/'percent' on an ohm- or siemens-typed attribute is set_attr's
     conversion inverted, through the same impedance.z_base (the object's
     rating, a From* target's, else its BaseVoltage and `system_base`);
-    base='system' forces the system base, as `(pu system)` does. On a PerCent
+    base='system' forces the system base, as `(pu system)` does. `power_base`
+    reads it on another power at the same voltage (impedance.z_base): a mesh
+    impedance's percent on winding 1's kVA, x on the From winding's baseU and
+    power_base. On a PerCent
     attribute 'percent' (or '') returns the stored percent number. Any other
     unit converts through pint. Raises ValueError for a name that is not a
     field, an association, a non-CIMUnit attribute, a base on a non-relative
@@ -188,8 +192,9 @@ def get_qty(
         raise ValueError(f"{attribute_name!r} is not a field of {type(source_object).__name__}")
     if field.metadata.get("inverse") is not None:
         raise ValueError(f"{where} is an association, not a quantity")
-    if base not in (None, "system") or (base is not None and unit not in ("pu", "percent")):
-        raise ValueError(f"{where}: only pu/percent take a base, and only 'system' (got {unit!r}, base={base!r})")
+    if base not in (None, "system") or ((base, power_base) != (None, None) and unit not in ("pu", "percent")):
+        raise ValueError(f"{where}: only pu/percent take a base or power_base, and the only base is 'system' "
+                         f"(got {unit!r}, base={base!r}, power_base={power_base!r})")
 
     value = getattr(source_object, attribute_name)
     if value is None:
@@ -203,7 +208,7 @@ def get_qty(
             raise ValueError(f"{where} is a PerCent: read it as 'percent', not {unit!r}")
         return value.value
     if unit in ("pu", "percent") and unit_name in ("ohm", "S"):
-        z_base = impedance.z_base(source_object, system_base, on_system_base=base == "system")
+        z_base = impedance.z_base(source_object, system_base, on_system_base=base == "system", power_base=power_base)
         si_value = value.to(unit_name)
         per_unit = si_value / z_base if unit_name == "ohm" else si_value * z_base
         return per_unit * 100 if unit == "percent" else per_unit

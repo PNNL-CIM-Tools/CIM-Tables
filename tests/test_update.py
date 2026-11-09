@@ -104,3 +104,38 @@ def test_update_statements_parse_and_format():
     records, _ = parser.parse_text(text)
     assert [r.form for r in records] == ['Update', 'Table']
     assert records[1].fields['mRID'] == 'Update EnergyConsumer: x'
+
+
+# --- explicit Terminals: the long form of the connectivity columns (CIMHub U11) ---
+
+_BV_NODES = ('Table BaseVoltage: mRID, nominalVoltage (kV)\n    bv, 12.47\n'
+             'Table ConnectivityNode: mRID\n    n1\n    n2\n')
+
+
+def _line_terminals(network):
+    line = network.find_by_mRID('ln1')
+    return [(t.mRID, t.sequenceNumber, t.ConnectivityNode.mRID, t.phases) for t in line.Terminals]
+
+
+def test_terminal_rows_after_their_equipment():
+    network = _network()
+    cimtables.load_text(_BV_NODES + (
+        'Object ACLineSegment: mRID=ln1, BaseVoltage=bv\n'
+        'Table Terminal: mRID, ConductingEquipment, ConnectivityNode, sequenceNumber, phases\n'
+        '    ln1_T1, ln1, n1, 1, ABC\n'
+        '    ln1_T2, ln1, n2, 2, ABC\n'), network)
+    assert _line_terminals(network) == [('ln1_T1', 1, 'n1', cim.PhaseCode.ABC), ('ln1_T2', 2, 'n2', cim.PhaseCode.ABC)]
+    assert cim.ACLineSegmentPhase not in network.graph  # no phases column, no per-phase children
+
+
+def test_terminals_first_then_an_update_connects_them():
+    network = _network()
+    cimtables.load_text(_BV_NODES + (
+        'Table Terminal: mRID, ConnectivityNode, sequenceNumber\n'
+        '    t1, n1, 1\n'
+        '    t2, n2, 2\n'
+        'Object ACLineSegment: mRID=ln1, BaseVoltage=bv\n'
+        'Update Table Terminal: mRID, ConductingEquipment\n'
+        '    t1, ln1\n'
+        '    t2, ln1\n'), network)
+    assert _line_terminals(network) == [('t1', 1, 'n1', None), ('t2', 2, 'n2', None)]

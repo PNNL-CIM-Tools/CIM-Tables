@@ -5,11 +5,9 @@ The profile is set per test via monkeypatch (cim18v17, or a comma spec of its
 sub-profiles), and get_cim_profile's cache cleared on both sides."""
 
 import importlib
-import tempfile
 
 import pytest
 from cimgraph.core.env_vars import get_cim_profile
-from cimgraph.databases import XMLFile
 from cimgraph.models import FeederModel
 
 from cimtables import graph_write, parser, validate
@@ -26,7 +24,7 @@ def cim(monkeypatch):
 
 @pytest.fixture
 def network(cim):
-    net = FeederModel(connection=XMLFile(filename=tempfile.mktemp(suffix='.xml')),
+    net = FeederModel(connection=None,
                       container=cim.Feeder(mRID='test_feeder'), distributed=False)
     return net
 
@@ -169,7 +167,7 @@ def test_comma_spec_merged_profile_binds_end_to_end(monkeypatch):
     get_cim_profile.cache_clear()
     try:
         _, merged = get_cim_profile()
-        network = FeederModel(connection=XMLFile(filename=tempfile.mktemp(suffix='.xml')),
+        network = FeederModel(connection=None,
                               container=merged.Feeder(mRID='fdr'), distributed=False)
         assert network.cim is merged
         _bind_text(network, (

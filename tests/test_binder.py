@@ -9,7 +9,6 @@ ieee13.cimtbl is parsed and validated through the real parser and validator
 """
 
 import os
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -17,7 +16,6 @@ import pytest
 os.environ['CIMG_CIM_PROFILE'] = 'cim18v17'
 
 import cimprofiles.cim18.cim18v17 as cim
-from cimgraph.databases import XMLFile
 from cimgraph.models import BusBranchModel
 
 from cimtables import graph_write
@@ -30,7 +28,7 @@ _TARGET_CLASSES = {'EnergySource', 'BaseFrequency', 'BasePower', 'BaseVoltage'}
 
 @pytest.fixture
 def network():
-    conn = XMLFile(filename=tempfile.mktemp(suffix='.xml'))
+    conn = None  # in memory: cim-graph's XMLFile now raises on a missing file
     container = cim.Feeder(mRID='test_feeder')
     net = BusBranchModel(connection=conn, container=container, distributed=False)
     return net

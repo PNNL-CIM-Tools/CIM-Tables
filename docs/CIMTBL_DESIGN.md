@@ -187,10 +187,22 @@ prefix rule would capture real attributes such as `TopologicalNode.busName`.
 
 A real CIM attribute of the same name always wins over a DSL column.
 
+The connectivity columns are shorthand, never the only way. Terminals may be written out as their own rows,
+either after their equipment (`Table Terminal: mRID, ConductingEquipment, ConnectivityNode, sequenceNumber`) or
+first, with an `Update Table Terminal: mRID, ConductingEquipment` once the equipment exists. A consumer that
+needs a model's Terminals reads them from the bound model, not from the text: the `.cimtbl` contract is what
+binding makes.
+
 ### Phases
 
 `phases` lists conductors in order: `ABCN`, `CB`, `s1s2N`. The order is the conductor order, e.g. a phase
 impedance matrix's row order.
+
+**No `phases` is balanced three-phase.** A blank or absent `phases` cell makes no `<Class>Phase` children and
+leaves `Terminal.phases` unset, which CIM defines as ABC ("If the attribute is missing, three phases (ABC) shall
+be assumed", `Terminal.phases`). That is how a balanced device is written, on any class, including one with no
+`<Class>Phase` child class (`SeriesCompensator`). A consumer that wants every Terminal's phases explicit can fill
+the missing ones in after loading. `phases=ABC` means three separate phases, a per-phase device.
 
 - Every Terminal gets the canonical `PhaseCode` of the set (`CB` → `BC`, `s1s2N` → `s12N`).
 - One `<Class>Phase` child is made per token, carrying the normative `SinglePhaseKind` and a `sequenceNumber`
