@@ -52,15 +52,16 @@ def _resolve_node(network: GraphModel, col_name: str, node_mrid: str,
     return node_obj
 
 
-def _end_owner_field(cim: CN, end: CN.TransformerEnd) -> str:
+def end_owner_field(cim: CN, end: CN.TransformerEnd) -> str | None:
     """The end's reference to the ConductingEquipment its Terminal belongs to:
     'PowerTransformer' on a PowerTransformerEnd, 'AutoTransformer' on an
-    AutoTransformerEnd. Found from the type hints, not a per-class table."""
+    AutoTransformerEnd, None on an end with none (TransformerTankEnd). Found
+    from the type hints, not a per-class table."""
     for field_name, hint in graph_write.type_hints(type(end)).items():
         for arg in typing.get_args(hint) or (hint,):
             if isinstance(arg, type) and issubclass(arg, cim.ConductingEquipment):
                 return field_name
-    raise ValueError(f"{end.mRID!r}: {type(end).__name__} has no ConductingEquipment reference to put a Terminal on")
+    return None
 
 
 def add_connectivity(network: GraphModel, equipment: CN.ConductingEquipment|CN.TransformerEnd, *,
@@ -106,7 +107,9 @@ def add_connectivity(network: GraphModel, equipment: CN.ConductingEquipment|CN.T
 
     is_end = isinstance(equipment, cim.TransformerEnd)
     if is_end:
-        owner_field = _end_owner_field(cim, equipment)
+        owner_field = end_owner_field(cim, equipment)
+        if owner_field is None:
+            raise ValueError(f"{equipment.mRID!r}: {type(equipment).__name__} has no ConductingEquipment reference to put a Terminal on")
         transformer = getattr(equipment, owner_field)
         if transformer is None or equipment.endNumber is None:
             raise ValueError(
@@ -147,7 +150,7 @@ def add_connectivity(network: GraphModel, equipment: CN.ConductingEquipment|CN.T
 
 
 _PHASE_TOKEN = re.compile(r's1|s2|[ABCN]')
-_PHASE_ORDER = ['A', 'B', 'C', 's1', 's2', 'N']
+PHASE_ORDER = ['A', 'B', 'C', 's1', 's2', 'N']
 
 
 def parse_phases(phases: str) -> list[str]:
@@ -162,31 +165,36 @@ def parse_phases(phases: str) -> list[str]:
 def phase_code(tokens: list[str]) -> str:
     """Canonical PhaseCode value for a token set: ['C', 'B'] -> 'BC',
     ['s1', 's2', 'N'] -> 's12N'."""
-    ordered = ''.join(sorted(tokens, key=_PHASE_ORDER.index))
+    ordered = ''.join(sorted(tokens, key=PHASE_ORDER.index))
     return ordered.replace('s1s2', 's12')
 
 
-def _phase_cls(network: GraphModel, obj: object) -> type:
+def phase_cls(cim: CN, obj: object) -> type | None:
     """The per-phase child class for obj: <Class>Phase for the nearest class
     in its MRO that has one (LinearShuntCompensator -> LinearShuntCompensatorPhase,
-    Breaker -> SwitchPhase)."""
+    Breaker -> SwitchPhase), or None (VoltageRegulator, a TransformerEnd)."""
     for cls in type(obj).__mro__:
-        phase_cls = getattr(network.cim, f'{cls.__name__}Phase', None)
-        if phase_cls is not None:
-            return phase_cls
-    raise ValueError(f"{type(obj).__name__} has no <Class>Phase child class for a phases column")
+        child_cls = getattr(cim, f'{cls.__name__}Phase', None)
+        if child_cls is not None:
+            return child_cls
+    return None
 
 
 # Normative delta rule (SinglePhaseKind): the child connects its phase "to the next
 # logical non-neutral phase".
-_NEXT_PHASE = {'A': 'B', 'B': 'C', 'C': 'A', 's1': 's2'}
+NEXT_PHASE = {'A': 'B', 'B': 'C', 'C': 'A', 's1': 's2'}
 
 
-def add_phase_children(network: GraphModel, obj: CN.ConductingEquipment, terminals: list[CN.Terminal], *,
-                       phases: str | None = None, phaseSide1: str | None = None,
-                       phaseSide2: str | None = None) -> list[CN.PowerSystemResource]:
-    """phases='ABCN' -> per-phase children (e.g. ACLineSegmentPhase),
-    wired to obj. Every terminal gets the canonical PhaseCode of the set.
+def phase_plan(cim: CN, obj: object, terminal_count: int, *, phases: str | None = None,
+               phaseSide1: str | None = None, phaseSide2: str | None = None
+               ) -> tuple[list[str], type | None, list[tuple[str, dict]]]:
+    """What a phases (or phaseSide1 + phaseSide2) cell makes on obj, without
+    making it: (the PhaseCode value of each terminal, the child class, and
+    [(child mRID, {field: value})] in sequence order). The child class is None
+    on a TransformerEnd, whose phases live on its terminal only. Raises
+    ValueError where binding the cell would. add_phase_children builds from
+    it; the writer folds children back into a phases cell by comparing them
+    against it.
 
     phaseSide1='AB', phaseSide2='AC' instead of phases: a switch whose sides
     differ (only a child class with phaseSide1/phaseSide2, i.e. SwitchPhase).
@@ -201,8 +209,7 @@ def add_phase_children(network: GraphModel, obj: CN.ConductingEquipment, termina
       indicated phase to the next logical non-neutral phase"), plus the branch
       PhaseCode in the `phases` extension where the class has it: a delta load
       on BC is one child phase=B, phases=BC; on CA it's phase=C, phases=AC."""
-    cim = network.cim
-    if not terminals:
+    if not terminal_count:
         raise ValueError(f"{obj.mRID!r}: a phases column needs a node/bus column to put the phases on")
     if phases is not None and (phaseSide1 is not None or phaseSide2 is not None):
         raise ValueError(f"{obj.mRID!r}: give either phases or phaseSide1/phaseSide2, not both")
@@ -210,55 +217,69 @@ def add_phase_children(network: GraphModel, obj: CN.ConductingEquipment, termina
         raise ValueError(f"{obj.mRID!r}: {type(obj).__name__} has a real phase attribute; its Terminal takes that, not a phases column")
     if phases is not None:
         tokens = side2_tokens = parse_phases(phases)
-        for terminal in terminals:
-            graph_write.set_attr(terminal, cim, 'phases', cim.PhaseCode(phase_code(tokens)))
+        codes = [phase_code(tokens)] * terminal_count
     else:
         if phaseSide1 is None or phaseSide2 is None:
             raise ValueError(f"{obj.mRID!r}: phaseSide1 and phaseSide2 must be given together")
         tokens, side2_tokens = parse_phases(phaseSide1), parse_phases(phaseSide2)
-        if len(tokens) != len(side2_tokens) or len(terminals) != 2:
+        if len(tokens) != len(side2_tokens) or terminal_count != 2:
             raise ValueError(
                 f"{obj.mRID!r}: phaseSide1 {phaseSide1!r} / phaseSide2 {phaseSide2!r} need the same "
-                f"number of phases and two terminals (got {len(terminals)})"
+                f"number of phases and two terminals (got {terminal_count})"
             )
-        graph_write.set_attr(terminals[0], cim, 'phases', cim.PhaseCode(phase_code(tokens)))
-        graph_write.set_attr(terminals[1], cim, 'phases', cim.PhaseCode(phase_code(side2_tokens)))
+        codes = [phase_code(tokens), phase_code(side2_tokens)]
     if isinstance(obj, cim.TransformerEnd):
-        return []  # an end's phases live on its terminal only
+        return codes, None, []  # an end's phases live on its terminal only
 
-    phase_cls = _phase_cls(network, obj)
-    parent_field = _parent_assoc_field(phase_cls, obj)
-    child_hints = graph_write.type_hints(phase_cls)
-    has_sequence_number = 'sequenceNumber' in child_hints
+    child_cls = phase_cls(cim, obj)
+    if child_cls is None:
+        raise ValueError(f"{type(obj).__name__} has no <Class>Phase child class for a phases column")
+    child_hints = graph_write.type_hints(child_cls)
     has_sides = 'phaseSide1' in child_hints
     if tokens != side2_tokens and not has_sides:
-        raise ValueError(f"{obj.mRID!r}: {phase_cls.__name__} has one phase per child, so phaseSide1/phaseSide2 can't differ")
+        raise ValueError(f"{obj.mRID!r}: {child_cls.__name__} has one phase per child, so phaseSide1/phaseSide2 can't differ")
 
     if getattr(obj, 'phaseConnection', None) == cim.PhaseShuntConnectionKind.D:
-        from_phases = [t for t in tokens if _NEXT_PHASE.get(t) in tokens]
+        from_phases = [t for t in tokens if NEXT_PHASE.get(t) in tokens]
         if not from_phases:
             raise ValueError(f"{obj.mRID!r}: a delta connection needs two non-neutral phases, got {phases!r}")
-        new_children = []
+        children = []
         for t in from_phases:
-            branch_code = phase_code([t, _NEXT_PHASE[t]])
-            child = phase_cls(mRID=f'{obj.mRID}_{branch_code}', phase=cim.SinglePhaseKind(t))
+            branch_code = phase_code([t, NEXT_PHASE[t]])
+            fields = {'phase': cim.SinglePhaseKind(t)}
             if 'phases' in child_hints:
-                child.phases = cim.PhaseCode(branch_code)
-            new_children.append(child)
+                fields['phases'] = cim.PhaseCode(branch_code)
+            children.append((f'{obj.mRID}_{branch_code}', fields))
     elif has_sides:  # SwitchPhase: phaseSide1/phaseSide2 instead of phase
-        new_children = [
-            phase_cls(mRID=f'{obj.mRID}_{t1}', phaseSide1=cim.SinglePhaseKind(t1), phaseSide2=cim.SinglePhaseKind(t2))
-            for t1, t2 in zip(tokens, side2_tokens)
-        ]
+        children = [(f'{obj.mRID}_{t1}', {'phaseSide1': cim.SinglePhaseKind(t1), 'phaseSide2': cim.SinglePhaseKind(t2)})
+                    for t1, t2 in zip(tokens, side2_tokens)]
     else:
-        new_children = [phase_cls(mRID=f'{obj.mRID}_{t}', phase=cim.SinglePhaseKind(t)) for t in tokens]
+        children = [(f'{obj.mRID}_{t}', {'phase': cim.SinglePhaseKind(t)}) for t in tokens]
 
+    if 'sequenceNumber' in child_hints:
+        for i, (_, fields) in enumerate(children, start=1):
+            fields['sequenceNumber'] = i
+    return codes, child_cls, children
+
+
+def add_phase_children(network: GraphModel, obj: CN.ConductingEquipment, terminals: list[CN.Terminal], *,
+                       phases: str | None = None, phaseSide1: str | None = None,
+                       phaseSide2: str | None = None) -> list[CN.PowerSystemResource]:
+    """phases='ABCN' (or phaseSide1 + phaseSide2) -> per-phase children (e.g.
+    ACLineSegmentPhase) wired to obj, and every terminal's PhaseCode, as
+    phase_plan describes. Returns the children (none on a TransformerEnd)."""
+    cim = network.cim
+    codes, child_cls, plan = phase_plan(cim, obj, len(terminals), phases=phases,
+                                        phaseSide1=phaseSide1, phaseSide2=phaseSide2)
+    for terminal, code in zip(terminals, codes):
+        graph_write.set_attr(terminal, cim, 'phases', cim.PhaseCode(code))
+    if child_cls is None:
+        return []
+    parent_field = _parent_assoc_field(child_cls, obj)
     children = []
-    for i, child in enumerate(new_children, start=1):
-        if has_sequence_number:
-            child.sequenceNumber = i
+    for mRID, fields in plan:
+        child = child_cls(mRID=mRID, **fields)
         graph_write.set_assc(child, cim, parent_field, obj)
         graph_write.add_to_graph(network, child)
         children.append(child)
-
     return children

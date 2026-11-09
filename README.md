@@ -163,6 +163,13 @@ pip install --pre cimtables
   `load_model(path, model_cls=BusBranchModel)` builds a bus-branch model instead.
 - **`cimtables.load(path, network)`** adds a file's objects to a cim-graph model you already have, and
   `load_text(text, network)` does the same for a string.
+- **`cimtables.to_documents(model, name)`** turns any cim-graph model (one read from CIM XML, say) into
+  `.cimtbl`; `cimtables.document.write_documents(documents, directory)` writes the files. Loading them back
+  gives an equal model. By default an equipment's Terminals and per-phase objects are folded into its `node1`,
+  `node2` and `phases` columns, which renames them to `<mRID>_T1` and `<mRID>_A` (their UUIDs change too);
+  `terminals='explicit'` keeps every Terminal as its own row with its mRID. Units are picked per column (kV,
+  kW, ohm/km, ...); `units={'ACLineSegment.length': 'ft', 'PowerTransformerEnd.x': 'percent'}` (or a JSON
+  file of the same) fixes them, and `parts={'catalog': ['WireInfo', ...]}` splits classes into imported files.
 - **`cimtables.document`** writes `.cimtbl` files from Python with stable, aligned formatting. Model converters
   use it to produce `.cimtbl` that a person can then read and edit.
 - Once loaded, the model is ordinary cim-graph: query it, modify it, and write it out with cim-graph's
@@ -197,7 +204,8 @@ This is an early release.
 - The CIM 18 profile `cim18v17` is the one that is tested. Other profiles work in principle, because nothing
   here is profile-specific, but they are not yet covered by tests.
 - References must point backwards in the file. Forward references are an open question.
-- Reading is complete; writing a `.cimtbl` file *from* an arbitrary cim-graph model is not built yet.
+- A written model's UUIDs are seeded from its mRIDs, as for any `.cimtbl`: a CIM XML object whose UUID isn't
+  its mRID's gets a new one.
 
 ## License
 
