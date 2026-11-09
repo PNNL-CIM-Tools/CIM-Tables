@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`cimtables` implements the `.cimtbl` DSL — a hand-editable tabular text format for CIM power-system models — as parser → profile-reflective validator → binder onto live `cim-graph` objects. It was split out of CIM-Builder (`/home/ande188/CIM-Builder`, package `cimbuilder`), which now depends on this package. **`cimtables` must never import `cimbuilder`**; the dependency is strictly `cimprofiles` → `cim-graph` → `cimtables` → `cimbuilder`.
+`cimtables` (PyPI distribution `cim-tables`; dependencies are named `cim-graph` / `cim-profiles`, imported as `cimgraph` / `cimprofiles`) implements the `.cimtbl` DSL — a hand-editable tabular text format for CIM power-system models — as parser → profile-reflective validator → binder onto live `cim-graph` objects. It was split out of CIM-Builder (`/home/ande188/CIM-Builder`, package `cimbuilder`), which now depends on this package. **`cimtables` must never import `cimbuilder`**; the dependency is strictly `cimprofiles` → `cim-graph` → `cimtables` → `cimbuilder`.
 
 The design of record is `docs/CIMTBL_DESIGN.md`: the format, the pipeline, and the decisions, as built. Keep it current when behaviour changes, and don't cite it (or anything else) by section number; reference headings by name. The pre-implementation design and its history are in CIM-Builder's git history (`cimbuilder/development/CIMTBL_DESIGN.md`, `GRAPH_WRITE_CONTRACT.md`, `PROFILE_RESOLUTION.md`); don't point code at them.
 

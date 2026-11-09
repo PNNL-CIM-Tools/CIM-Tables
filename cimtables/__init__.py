@@ -24,7 +24,7 @@ from cimtables.units import Qty
 from cimtables.validate import CimtblValidationError
 from cimtables.writer import to_documents
 
-__version__ = version('cimtables')
+__version__ = version('cim-tables')
 
 __all__ = [
     'bind_row', 'connectivity', 'document', 'graph_write', 'impedance', 'synthetic', 'validate', 'writer',

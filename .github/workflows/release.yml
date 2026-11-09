@@ -1,5 +1,5 @@
 ---
-# Publishes cimtables to PyPI (the same chain as CIM-Profiles).
+# Publishes cim-tables (import name cimtables) to PyPI (the same chain as CIM-Profiles).
 #   develop -> alpha pre-release (0.1.0a1, 0.1.0a2, ...)
 #   main    -> full release      (0.1.0)
 #
@@ -9,14 +9,14 @@
 # released both branches move on to the next patch. Bump the target in a PR
 # for minor/major releases.
 #
-# cim-graph and cimprofiles come from PyPI here: [tool.uv.sources] points at
+# cim-graph and cim-profiles come from PyPI here: [tool.uv.sources] points at
 # sibling checkouts for local development only, so every uv call that resolves
 # takes --no-sources, and `uv version` writes with --frozen (it would re-lock
 # against those missing paths). The lockfile is the sibling one, so it is not
 # used (--locked) in CI.
 #
 # Uses PyPI Trusted Publishing (OIDC); no API token is stored. One-time setup:
-#   1. PyPI -> Publishing -> add a pending GitHub publisher for project cimtables:
+#   1. PyPI -> Publishing -> add a pending GitHub publisher for project cim-tables:
 #      owner PNNL-CIM-Tools, repo CIM-Tables, workflow release.yml, environment pypi
 #   2. GitHub repo -> Settings -> Environments -> create "pypi"
 name: Release
@@ -60,7 +60,7 @@ jobs:
             echo "::error::pyproject.toml version must be the next release target X.Y.Z, got $TARGET"
             exit 1
           fi
-          PUBLISHED=$(curl -sf https://pypi.org/pypi/cimtables/json | jq -r '.releases | keys[]')
+          PUBLISHED=$(curl -sf https://pypi.org/pypi/cim-tables/json | jq -r '.releases | keys[]')
           while grep -qxF "$TARGET" <<< "$PUBLISHED"; do
             TARGET=$(uv version --bump patch --frozen --short)
           done
@@ -89,7 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/cimtables/${{ needs.build.outputs.version }}/
+      url: https://pypi.org/project/cim-tables/${{ needs.build.outputs.version }}/
     permissions:
       id-token: write
     steps:
