@@ -24,8 +24,8 @@ classifiers = [
 ]
 dependencies = [
     # pre-1.0, and cimtables reflects on their internals: pin below the next minor
-    "cim-graph>=0.6.0a0,<0.7",
-    "cimprofiles>=0.1.0a4,<0.2",
+    "cim-graph>=0.6.0a2,<0.7",
+    "cim-profiles>=0.1.0a1,<0.2",
     "lark>=1.1.9",
 ]
 
@@ -48,7 +48,7 @@ prerelease = "allow"
 # Local development against sibling checkouts of CIM-Graph and CIM-Profiles.
 [tool.uv.sources]
 cim-graph = { path = "../CIM-Graph", editable = true }
-cimprofiles = { path = "../CIM-Profiles", editable = true }
+cim-profiles = { path = "../CIM-Profiles", editable = true }
 
 [build-system]
 requires = ["hatchling>=1.27"]  # PEP 639 license / license-files
