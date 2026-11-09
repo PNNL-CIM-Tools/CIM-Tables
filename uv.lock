@@ -200,7 +200,6 @@ requires-dist = [
     { name = "gridappsd-python", marker = "extra == 'gridappsd'", specifier = ">=2026.2.1" },
     { name = "mysql-connector-python", marker = "extra == 'mysql'", specifier = ">=9.2.0" },
     { name = "neo4j", marker = "extra == 'neo4j'", specifier = ">=5.10.0" },
-    { name = "nest-asyncio", marker = "extra == 'neo4j'", specifier = ">=1.5.8" },
     { name = "oxrdflib", marker = "extra == 'rdflib'", specifier = ">=0.3.6" },
     { name = "rdflib", marker = "extra == 'rdflib'", specifier = ">=7.0.0" },
     { name = "requests", specifier = ">=2.31" },

@@ -15,18 +15,20 @@ from importlib.metadata import version
 from cimgraph.core import get_cim_profile, get_model_authority, get_model_name, set_model_scope
 from cimgraph.models import BusBranchModel, FeederModel, GraphModel, NodeBreakerModel
 
-from cimtables import connectivity, document, graph_write, impedance, synthetic, validate
+from cimtables import connectivity, document, graph_write, impedance, synthetic, validate, writer
 from cimtables.binder import CimtblBindError, bind_row
 from cimtables.diff import diff_models
 from cimtables.parser import CimtblParseError, Header, parse_file, parse_text
 from cimtables.records import ImportRecord, RawRecord
 from cimtables.units import Qty
 from cimtables.validate import CimtblValidationError
+from cimtables.writer import to_documents
 
 __version__ = version('cimtables')
 
 __all__ = [
-    'bind_row', 'connectivity', 'document', 'graph_write', 'impedance', 'synthetic', 'validate',
+    'bind_row', 'connectivity', 'document', 'graph_write', 'impedance', 'synthetic', 'validate', 'writer',
+    'to_documents',
     'Header', 'parse_file', 'parse_text', 'ImportRecord', 'RawRecord', 'Qty',
     'CimtblParseError', 'CimtblValidationError', 'CimtblBindError', 'diff_models', 'load', 'load_text', 'load_model',
 ]

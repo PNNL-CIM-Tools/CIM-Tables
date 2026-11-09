@@ -52,6 +52,7 @@ cimprofiles  →  cim-graph  →  cimtables  →  cimbuilder
 | `impedance.py` | The base for pu/percent impedances. |
 | `units.py` | `Qty(value, unit, base)`, the carrier for a `(unit)` column. |
 | `document.py` | The parser's inverse: a `Document` of cell text → deterministic `.cimtbl` text. |
+| `writer.py` | `to_documents`: a cim-graph model → `Document`s that load back into an equal model. |
 
 ## Load-bearing decisions
 
@@ -395,19 +396,46 @@ quoted empty, optional comments on documents, tables and rows). Turning typed va
 returns the master's path. It writes nothing if a name repeats, an Import is unknown, a part is never imported, or
 `dir` holds a stale `.cimtbl`. CIMHub diffs this output byte for byte.
 
-### The cim-graph → `.cimtbl` writer (not built yet)
+### The cim-graph → `.cimtbl` writer (`writer.py`)
 
-There is no writer module yet. The intended design:
+`to_documents(network, name, *, terminals='folded', units=None, parts=None)` turns a model into a
+`DocumentSet`, written with `write_documents`. It is checked by loading the output back (`load_model`) and
+comparing it with `diff_models`. Byte-identical text is not a goal: the model doesn't record a file's header
+shapes, units or split, so the writer chooses them.
 
-- **multi-file**, ordered by reference dependency (catalogs → templates → instances), so every file's references
-  are declared by an earlier `Import`;
-- **`Object`** for a class with one instance and **`Table`** for more, never split by raggedness;
-- **units on export** via `.to(header_unit)`, never manual scaling;
-- **connectivity inverse**: Terminals back to `node*`/`bus*` columns, collapsing synthesized phase children back
-  to `phases` where they match the synthesis rule;
-- **deterministic**, built on `document.py`;
-- **round-trip test**: `.cimtbl → graph → .cimtbl` byte-identical for the fixtures, and `graph → .cimtbl → graph`
-  isomorphic.
+- **Rows.** One row per object in its class's `Table` (an `Object` for a class with one instance), keyed by
+  `mRID` (an Identity-only object by its `identifier`, written as its UUID). Columns are the key, `name`, the
+  connectivity and phase columns, then the class's fields in profile order, each only if some row sets it; a
+  blank cell is unset.
+- **Terminals, folded (the default).** An equipment's Terminals become its `node`/`node1`/`node2` and
+  `bus`/`bus1`/`bus2` columns, and its `<Class>Phase` children its `phases` (or `phaseSide1`/`phaseSide2`)
+  column, wherever binding that row makes exactly them: the writer reads a candidate cell off the children and
+  compares them with `connectivity.phase_plan`, the same plan `add_phase_children` builds from. A
+  `TransformerEnd` takes its own Terminal as `node` (and `phases`). Folded objects get binding's generated mRIDs
+  (`<mRID>_T<n>`, `<mRID>_<phase>`), so their mRIDs and UUIDs change, and references to them follow; their other
+  attributes become `Update` rows. An equipment that doesn't fold (three terminals, odd sequence numbers,
+  children binding wouldn't make, a node binding would put in a container) keeps them all explicit.
+- **Terminals, explicit.** Every Terminal and phase child is its own row with its own mRID: the lossless form.
+- **Order.** Classes are sorted (Kahn's algorithm, ties by name) over the references only one side can write: a
+  single-valued side whose inverse is unserialized or a list. Rows are sorted by key. Of an association whose
+  two single-valued sides are both serialized (`AutoTransformerEnd.RatioTapChanger` and
+  `RatioTapChanger.TransformerEnd`), only the later object writes it. A reference to a row not yet written (a
+  cycle, such as a compensator and the control that names its Terminal) and a list-valued side become `Update`
+  rows at the end of the master, when every object exists. An object with a deferred reference defers its
+  pu/percent cells with it, so their base is bound first.
+- **Units.** `units={'Class.attr' or 'attr': unit}` (or a JSON file of it) fixes a column's unit, matched on
+  the row class or any base (`TransformerEnd.r`), `pu`/`percent` and `pu system` included, read through
+  `get_qty`. Otherwise a quantity column is in SI or a readable multiple (kV, kW, MW, kVA, ohm/km, uS/km, ...):
+  the one that puts the column's median in [1, 1000), else the one with the fewest digits. Quantities are
+  written with the fewest significant digits that read back within 1e-12 (`13.2` kV, not
+  `13.200000000000001`); every other number exactly.
+- **Parts.** `parts={part: [class names]}` writes those classes into `<part>.cimtbl`, imported by the master at
+  the first class's place. A split in which parts, or a part and a master class, reference each other raises:
+  an Import can't be both before and after another.
+- **Limits.** UUIDs are seeded from mRIDs, as for any `.cimtbl`, so a CIM XML object whose UUID isn't its
+  mRID's gets a new one, and an object without an mRID is written with its UUID as one. Round trips are exact
+  for `load_model`, which binds with no container; `load(path, network)` into a model with a container also
+  defaults one onto rows that have none.
 
 ## Open questions
 

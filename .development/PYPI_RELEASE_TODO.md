@@ -135,3 +135,6 @@ Audit of `rc1` @ 21c41f7 (2026-11-06). State: 223 tests pass on Python 3.10 and 
 - [x] (checked: the grammar builds in 12 ms, so lark's `cache=True` isn't worth it; 0.58 s of the 0.77 s is
       `cimgraph.models`, via its SPARQL database imports, for cim-graph to make lazy) `import cimtables` takes ~1 s, mostly cim-graph's model imports. Lark's `cache=True` could trim the
       grammar build.
+- [x] (done 2026-11-09, `feature/writer`: `writer.to_documents`, folded or explicit Terminals, reference
+      ordering with `Update` for cycles, per-column units or a JSON config, `parts`; CIMHub's IEEE13_CDPSM golden
+      round-trips exactly both ways) The cim-graph → `.cimtbl` writer.
