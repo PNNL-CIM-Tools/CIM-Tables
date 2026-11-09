@@ -1,0 +1,175 @@
+"""load_model: a .cimtbl master file -> an in-memory GraphModel, with the file's
+own Feeder or Substation as its container and no made-up container leaking in,
+and its UUIDs seeded under the file's Authority=/Model= scope."""
+
+import os
+
+os.environ['CIMG_CIM_PROFILE'] = 'cim18v17'
+
+import pytest
+from cimgraph.core import get_cim_profile, get_model_authority, get_model_name, set_model_scope
+from cimgraph.databases import XMLFile
+from cimgraph.models import BusBranchModel, FeederModel, NodeBreakerModel
+from cimgraph.utils import write_xml
+
+import cimtables
+
+
+def _write(tmp_path, text):
+    path = tmp_path / 'model.cimtbl'
+    path.write_text(text)
+    return path
+
+
+def test_feeder_file_gives_a_feeder_model(tmp_path):
+    network = cimtables.load_model(_write(tmp_path, (
+        'Object Substation: mRID=sub_a\n'
+        'Object Feeder: mRID=fdr_a, NormalEnergizingSubstation=sub_a\n'
+        'Object BaseVoltage: mRID=bv_12, nominalVoltage (kV)=12.47\n'
+        'Object EnergySource: mRID=src, node1=bus_a, BaseVoltage=bv_12, EquipmentContainer=fdr_a\n'
+    )))
+    assert isinstance(network, FeederModel)
+    assert network.connection is None
+    assert network.container is network.find_by_mRID('fdr_a')
+    assert network.find_by_mRID('src').EquipmentContainer is network.container
+
+
+def test_substation_file_gives_a_node_breaker_model(tmp_path):
+    network = cimtables.load_model(_write(tmp_path, (
+        'Object Substation: mRID=sub_a\n'
+        'Object BaseVoltage: mRID=bv_115, nominalVoltage (kV)=115\n'
+        'Object EnergySource: mRID=src, node1=bus_a, BaseVoltage=bv_115, EquipmentContainer=sub_a\n'
+    )))
+    assert isinstance(network, NodeBreakerModel)
+    assert network.container is network.find_by_mRID('sub_a')
+
+
+def test_file_without_a_container_sets_no_equipment_container(tmp_path):
+    network = cimtables.load_model(_write(tmp_path, (
+        'Object BaseVoltage: mRID=bv_12, nominalVoltage (kV)=12.47\n'
+        'Object EnergySource: mRID=src, node1=bus_a, BaseVoltage=bv_12\n'
+    )))
+    assert isinstance(network, NodeBreakerModel)
+    assert network.container is None
+    source = network.find_by_mRID('src')
+    assert source.EquipmentContainer is None
+    assert network.find_by_mRID('bus_a').ConnectivityNodeContainer is None
+
+
+@pytest.fixture
+def model_scope(monkeypatch):
+    """load_model sets the process-global model scope; restore it afterwards."""
+    monkeypatch.setenv('CIMG_MODEL_AUTHORITY', get_model_authority())
+    monkeypatch.setenv('CIMG_MODEL_NAME', get_model_name())
+    yield
+    monkeypatch.undo()
+    get_model_authority.cache_clear()
+    get_model_name.cache_clear()
+
+
+_SOURCE = ('Object BaseVoltage: mRID=bv_12, nominalVoltage (kV)=12.47\n'
+           'Object EnergySource: mRID=src, node1=bus_a, BaseVoltage=bv_12\n')
+
+
+def test_model_statement_scopes_the_uuids(tmp_path, model_scope):
+    ieee13 = cimtables.load_model(_write(tmp_path, 'Model = ieee13\n' + _SOURCE))
+    ieee123 = cimtables.load_model(_write(tmp_path, 'Model = ieee123\n' + _SOURCE))
+    assert ieee13.find_by_mRID('src').identifier != ieee123.find_by_mRID('src').identifier
+    assert get_model_name() == 'ieee123'
+
+
+def test_model_scope_survives_an_xml_round_trip(tmp_path, model_scope):
+    network = cimtables.load_model(_write(tmp_path, (
+        'Authority = https://example.org/utility\n'
+        'Model = ieee13\n' + _SOURCE)))
+    out = tmp_path / 'out.xml'
+    write_xml(network, str(out))
+    set_model_scope('https://example.org/other', 'other')  # the reader restores it from the header
+
+    read_back = FeederModel(connection=XMLFile(filename=str(out)), container=None, distributed=False)
+    assert (get_model_authority(), get_model_name()) == ('https://example.org/utility', 'ieee13')
+    assert read_back.find_by_mRID('src').identifier == network.find_by_mRID('src').identifier
+
+
+def test_load_text_binds_a_snippet_onto_an_existing_network():
+    network = NodeBreakerModel(container=None, connection=None, distributed=False)
+    cimtables.load_text("""
+Object Feeder: mRID=fdr_ieee13nodeckt
+Table PowerElectronicsConnection: mRID
+    storage_school
+    storage_batidle
+Table BatteryUnit: mRID, ratedE (kWh), storedE (kWh), batteryState, PowerElectronicsConnection, EquipmentContainer=fdr_ieee13nodeckt
+    storage_school_unit,  200,  100, discharging, storage_school
+    storage_batidle_unit, 200,  100, waiting,     storage_batidle
+""", network)
+    unit = network.find_by_mRID('storage_school_unit')
+    assert unit.ratedE.to('kWh') == 200
+    assert unit.PowerElectronicsConnection is network.find_by_mRID('storage_school')
+    assert unit.EquipmentContainer is network.find_by_mRID('fdr_ieee13nodeckt')
+
+
+def test_load_text_rejects_an_import():
+    network = NodeBreakerModel(container=None, connection=None, distributed=False)
+    with pytest.raises(ValueError, match=r"Import 'lines.cimtbl' needs a file"):
+        cimtables.load_text('Import lines.cimtbl\n', network)
+
+
+def test_load_text_rejects_a_profile_other_than_the_networks():
+    network = NodeBreakerModel(container=None, connection=None, distributed=False)
+    with pytest.raises(cimtables.CimtblValidationError, match=r"x\.cimtbl: Profile = cim17v40, but the network's profile is cimprofiles\.cim18\.cim18v17"):
+        cimtables.load_text('Profile = cim17v40\nObject BaseVoltage: mRID=bv\n', network, source_file='x.cimtbl')
+
+
+def test_load_text_accepts_the_networks_profile_by_its_short_name(monkeypatch):
+    """CIMG_CIM_PROFILE spelled in full, Profile= short: the same module, no mismatch."""
+    monkeypatch.setenv('CIMG_CIM_PROFILE', 'cimprofiles.cim18.cim18v17')
+    get_cim_profile.cache_clear()
+    try:
+        network = NodeBreakerModel(container=None, connection=None, distributed=False)
+        cimtables.load_text('Profile = cim18v17\nObject BaseVoltage: mRID=bv\n', network)
+    finally:
+        monkeypatch.undo()
+        get_cim_profile.cache_clear()
+    assert network.find_by_mRID('bv') is not None
+
+
+def test_bind_error_names_the_row_file_and_line():
+    network = NodeBreakerModel(container=None, connection=None, distributed=False)
+    with pytest.raises(cimtables.CimtblBindError, match=r"^x\.cimtbl:3: 'l1': BaseVoltage 'missing' .* not found") as exc_info:
+        cimtables.load_text('Table ACLineSegment: mRID, BaseVoltage, node1, node2\n\n    l1, missing, a, b\n',
+                            network, source_file='x.cimtbl')
+    assert isinstance(exc_info.value, ValueError) and isinstance(exc_info.value, TypeError)
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_feeder_model_keeps_the_files_base_power(tmp_path):
+    network = cimtables.load_model(_write(tmp_path, (
+        'Object BasePower: mRID=sbase, basePower (MVA)=50\n'
+        'Object Feeder: mRID=fdr\n'
+    )))
+    assert isinstance(network, FeederModel)
+    assert network.base_power.to('MVA') == pytest.approx(50)
+
+
+def test_bus_branch_model_from_a_bus_branch_file(tmp_path):
+    network = cimtables.load_model(_write(tmp_path, (
+        'Object BasePower: mRID=sbase, basePower (MVA)=50\n'
+        'Object BaseVoltage: mRID=bv_138, nominalVoltage (kV)=138\n'
+        'Table ACLineSegment: mRID, bus1, bus2, r (pu), x (pu), bch (pu), BaseVoltage\n'
+        '    line_1_2, bus_1, bus_2, 1.938E-2, 5.917E-2, 0.0528, bv_138\n'
+    )), model_cls=BusBranchModel)
+    assert isinstance(network, BusBranchModel)
+    assert network.container is None
+    assert network.base_power.to('MVA') == pytest.approx(50)
+    assert network.find_by_mRID('line_1_2').r.to('ohm') == pytest.approx(1.938e-2 * 138e3 ** 2 / 50e6)
+    assert network.find_by_mRID('line_1_2').Terminals[0].TopologicalNode.mRID == 'bus_1'
+
+
+def test_bus_branch_model_takes_the_one_geographical_region(tmp_path):
+    network = cimtables.load_model(_write(tmp_path, 'Object GeographicalRegion: mRID=region\n'), model_cls=BusBranchModel)
+    assert network.container is network.find_by_mRID('region')
+
+
+def test_other_model_classes_are_rejected(tmp_path):
+    with pytest.raises(ValueError, match='or BusBranchModel, not FeederModel'):
+        cimtables.load_model(_write(tmp_path, 'Object Feeder: mRID=fdr\n'), model_cls=FeederModel)

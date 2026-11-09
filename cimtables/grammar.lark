@@ -1,0 +1,69 @@
+// The FIXED, profile-agnostic .cimtbl grammar: it knows no CIM class names.
+//
+// Line-oriented: each statement starts at column 0 and ends at a line break.
+// Table data rows are indented but that indentation is not significant to
+// the grammar - a row is just "a line that isn't a new top-level keyword".
+// Comments are %ignore'd inline (never swallowing their own newline), so a
+// comment-only line lexes down to a bare _NL - indistinguishable from a
+// blank line. Every statement/row terminator is therefore _NL+ (one or more
+// newlines), which absorbs any number of blank/comment-only lines between
+// real content, and the top level tolerates leading/trailing blank runs too.
+
+start: _NL* statement*
+
+statement: object_stmt
+         | table_stmt
+         | update_object_stmt
+         | update_table_stmt
+         | import_stmt
+         | profile_stmt
+         | authority_stmt
+         | model_stmt
+
+profile_stmt: PROFILE "=" NAME _NL+
+authority_stmt: AUTHORITY "=" VALUE _NL+
+model_stmt: MODEL "=" VALUE _NL+
+
+import_stmt: IMPORT FILENAME _NL+
+
+object_stmt: OBJECT NAME ":" assignment_list _NL+
+
+table_stmt: TABLE NAME ":" header_list _NL+ table_row*
+
+// additive: more attributes on objects an Object/Table row already defined
+update_object_stmt: UPDATE NAME ":" assignment_list _NL+
+update_table_stmt: UPDATE TABLE NAME ":" header_list _NL+ table_row*
+
+assignment_list: assignment ("," assignment)*
+assignment: NAME unit? "=" cell
+
+header_list: header_cell ("," header_cell)*
+header_cell: NAME unit? ("=" cell)?
+unit: "(" UNIT_TEXT ")"
+
+table_row: cell ("," cell)* _NL+
+
+cell: VALUE -> value
+    | QUOTED -> quoted
+    | -> blank
+
+// A keyword only where its statement's shape follows, so a row whose first
+// cell merely starts with one (Object_1, Profiles, Table 3) is a value
+PROFILE.3: /Profile(?=[ \t]*=)/
+AUTHORITY.3: /Authority(?=[ \t]*=)/
+MODEL.3: /Model(?=[ \t]*=)/
+IMPORT.3: /Import(?=[ \t]+[^\s#])/
+OBJECT.3: /Object(?=[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*:)/
+TABLE.3: /Table(?=[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*:)/
+UPDATE.3: /Update(?=[ \t]+(Table[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*:)/
+NAME.2: /[A-Za-z_][A-Za-z0-9_]*/
+VALUE: /[^,()\s#"][^,()\n#]*/   // never starts with whitespace, so an indented comment line is not a blank cell
+QUOTED: /"([^"\n]|"")*"/       // CSV-style: , # ( ) are literal inside, "" is one embedded quote
+UNIT_TEXT: /[^()\n]+/
+FILENAME: /[^\s#][^\n#]*\.cimtbl/
+
+_NL: /\r?\n/
+
+%ignore /[ \t]+/
+%ignore /#[^\n]*/
+%ignore /[ \t]+(?=\r?\n)/
