@@ -41,7 +41,7 @@ to check against.
 import dataclasses
 
 from cimgraph.models import GraphModel
-from cimtables import connectivity, graph_write, synthetic, validate
+from cimtables import connectivity, graph_write, synthetic, validate, wkt as wkt_parser
 from cimtables.units import Qty
 
 _SKIP_FIELDS = {*validate.KEY_FIELDS, 'source_file', 'source_line'}
@@ -123,12 +123,14 @@ def _bind_row(network: GraphModel, row: object, obj: object, container: object, 
         value = getattr(row, f.name)
         if value is None:
             continue
-        if update and f.name not in obj.__dataclass_fields__:
+        if update and f.name not in obj.__dataclass_fields__ and f.name != synthetic.WKT_COLUMN:
             raise ValueError(f"Update {row.mRID!r}: {f.name!r} is connectivity shorthand; set it where the object is defined")
         if update and getattr(obj, f.name) is not None and not isinstance(getattr(obj, f.name), list):
             raise ValueError(f"Update {row.mRID!r}: {f.name} is already set ({getattr(obj, f.name)!r}); an Update only adds")
 
-        if f.name in synthetic.CONNECTIVITY_COLUMNS and f.name not in obj.__dataclass_fields__:
+        if f.name == synthetic.WKT_COLUMN:
+            pass  # deferred: handled after the loop, needs obj to be fully built first
+        elif f.name in synthetic.CONNECTIVITY_COLUMNS and f.name not in obj.__dataclass_fields__:
             if synthetic.CONNECTIVITY_COLUMNS[f.name][0] == 'TopologicalNode':
                 bus_cols[f.name] = value
             else:
@@ -178,6 +180,10 @@ def _bind_row(network: GraphModel, row: object, obj: object, container: object, 
     if phase_cols:
         connectivity.add_phase_children(network, obj, terminals, **phase_cols)
 
+    wkt_value = getattr(row, synthetic.WKT_COLUMN, None)
+    if wkt_value is not None:
+        _bind_wkt(network, obj, row.mRID, wkt_value)
+
     # last: their base reads the ratings, BaseVoltage and From* set above. The
     # system base is a bound BasePower's only, so a system-base value never
     # depends on CIMG_SYSTEM_MVA_BASE or converts before its BasePower
@@ -188,4 +194,42 @@ def _bind_row(network: GraphModel, row: object, obj: object, container: object, 
     if not update:
         graph_write.add_to_graph(network, obj)
     return obj
+
+
+def _bind_wkt(network: GraphModel, obj: object, mrid: str, wkt_text: str) -> None:
+    """Create a Location and one PositionPoint per coordinate, wired to obj.
+
+    Location mRID: ``<mrid>_loc``. PositionPoint identifiers: ``<mrid>_loc_<seq>``.
+    The object must be a PowerSystemResource (have a Location slot); anything
+    else raises ValueError so the caller's CimtblBindError wraps it with its
+    file:line context."""
+    cim = network.cim
+    if not hasattr(cim, 'Location') or not hasattr(cim, 'PositionPoint'):
+        raise ValueError("wkt column requires a CIM profile that includes Location and PositionPoint")
+    loc_field = getattr(type(obj), '__dataclass_fields__', {}).get('Location')
+    if loc_field is None:
+        raise ValueError(
+            f"wkt column on {type(obj).__name__} {mrid!r}: {type(obj).__name__} has no Location slot "
+            f"(only PowerSystemResource subclasses support wkt)"
+        )
+
+    try:
+        geom = wkt_parser.parse(wkt_text)
+    except ValueError as exc:
+        raise ValueError(f"wkt column on {type(obj).__name__} {mrid!r}: {exc}") from exc
+
+    loc = cim.Location(mRID=f'{mrid}_loc')
+    graph_write.add_to_graph(network, loc)
+    graph_write.set_assc(obj, cim, 'Location', loc)
+
+    for seq, coord in enumerate(geom.coordinates):
+        pp = cim.PositionPoint()
+        pp.uuid(mRID=f'{mrid}_loc_{seq}')
+        pp.sequenceNumber = seq
+        pp.xPosition = coord.x
+        pp.yPosition = coord.y
+        if coord.z is not None:
+            pp.zPosition = coord.z
+        graph_write.set_assc(pp, cim, 'Location', loc)
+        graph_write.add_to_graph(network, pp)
 
