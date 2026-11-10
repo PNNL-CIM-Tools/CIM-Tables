@@ -10,6 +10,11 @@ newline. Table rows are indented 4 spaces; each cell but the last is padded
 after its comma to the column's widest cell, so columns line up. Every row
 writes every cell (a trailing None is a trailing empty cell).
 
+Row comments go on their own `#` lines above the row; a Table with
+`footnotes=True` instead lists each distinct row comment once, as `# note N:`
+lines above its header (numbered in order of first use), and ends each
+commented row with `# note N`. The parser ignores both forms.
+
 Quoting: a cell is quoted iff it contains `,` `(` `)` `#` `"`, starts or ends
 with whitespace, is the empty string, or starts like a statement (`Table X:`, `Update X:`,
 `Profile =`, `Import `), which the parser would otherwise read as one. Inner
@@ -53,6 +58,7 @@ class Table:
     rows: list[Row]
     comment: str | None = None
     update: bool = False  # an additive `Update Table <Class>:` statement
+    footnotes: bool = False  # row comments as numbered notes above the header, `# note N` on the row
 
 
 @dataclass
@@ -92,11 +98,21 @@ def _cell(text: str | None) -> str:
     return text
 
 
-def _comment(text: str | None, indent: str = '') -> list[str]:
-    """`# ` lines for a (possibly multi-line) comment; none for None."""
+def _comment(text: str | None, indent: str = '', prefix: str = '') -> list[str]:
+    """`# ` lines for a (possibly multi-line) comment, the first starting with prefix; none for None."""
     if text is None:
         return []
-    return [f'{indent}# {line}'.rstrip() for line in text.split('\n')]
+    return [f'{indent}# {prefix if number == 0 else ""}{line}'.rstrip()
+            for number, line in enumerate(text.split('\n'))]
+
+
+def _footnotes(table: Table) -> dict[str, int]:
+    """Each distinct row comment -> its note number, in order of first use."""
+    notes: dict[str, int] = {}
+    for row in table.rows:
+        if row.comment is not None and row.comment not in notes:
+            notes[row.comment] = len(notes) + 1
+    return notes
 
 
 def format_document(document: Document) -> str:
@@ -142,10 +158,21 @@ def format_document(document: Document) -> str:
                 raise ValueError(f'{document.name}: Table {statement.cim_class} row {row_number} is all blank')
             for position, text in enumerate(cells):
                 widths[position] = max(widths.get(position, 0), len(text))
+        notes = _footnotes(statement) if statement.footnotes else {}
+        if notes:
+            header_line = lines.pop()
+            for text, number in notes.items():
+                lines.extend(_comment(text.replace('\n', '\n  '), prefix=f'note {number}: '))
+            lines.append(header_line)
         for row, cells in zip(statement.rows, rows):
-            lines.extend(_comment(row.comment, _ROW_INDENT))
+            if not notes:
+                lines.extend(_comment(row.comment, _ROW_INDENT))
             padded = [(text + ',').ljust(widths[position] + 2) for position, text in enumerate(cells[:-1])]
-            lines.append((_ROW_INDENT + ''.join(padded) + cells[-1]).rstrip())
+            line = _ROW_INDENT + ''.join(padded) + cells[-1]
+            if notes and row.comment is not None:
+                last = len(cells) - 1
+                line = f'{_ROW_INDENT}{"".join(padded)}{cells[-1].ljust(widths[last])}  # note {notes[row.comment]}'
+            lines.append(line.rstrip())
         blocks.append(lines)
 
     return '\n\n'.join('\n'.join(block) for block in blocks) + '\n'

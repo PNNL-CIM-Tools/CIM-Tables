@@ -53,8 +53,9 @@ def test_random_tables_round_trip():
         for i in range(rng.randint(1, 5)):
             cells = [f'r{i}'] + [rng.choice([None, ''.join(rng.choices(alphabet, k=rng.randint(0, 6)))])
                                  for _ in range(rng.randint(required, len(columns)) - 1)]
-            rows.append(Row(cells, comment=rng.choice([None, 'between\nrows'])))
-        table = Table('IdentifiedObject', columns, rows, comment=rng.choice([None, 'above']))
+            rows.append(Row(cells, comment=rng.choice([None, 'between\nrows', 'a # b'])))
+        table = Table('IdentifiedObject', columns, rows, comment=rng.choice([None, 'above']),
+                      footnotes=rng.choice([False, True]))
         records, _ = parser.parse_text(format_document(Document('t', [table])))
         assert [(r.fields, r.units) for r in records] == _expected_records(table)
 
@@ -89,6 +90,29 @@ def test_layout_is_padded_and_deterministic():
         'Import wires.cimtbl\n'
     )
     assert format_document(document) == text
+
+
+def test_footnotes_list_each_comment_once_and_mark_the_rows():
+    table = Table('BaseVoltage', [Column('mRID'), Column('name')], [
+        Row(['bv_1', 'one'], comment='assumed'),
+        Row(['bv_22', None], comment='two\nlines'),
+        Row(['bv_3', 'three']),
+        Row(['bv_4', 'four'], comment='assumed'),
+    ], comment='voltages', footnotes=True)
+    text = format_document(Document('t', [table]))
+    assert text == (
+        '# voltages\n'
+        '# note 1: assumed\n'
+        '# note 2: two\n'
+        '#   lines\n'
+        'Table BaseVoltage: mRID, name\n'
+        '    bv_1,  one    # note 1\n'
+        '    bv_22,        # note 2\n'
+        '    bv_3,  three\n'
+        '    bv_4,  four   # note 1\n'
+    )
+    records, _ = parser.parse_text(text)
+    assert [(r.fields, r.units) for r in records] == _expected_records(table)
 
 
 def test_object_statement_round_trips():

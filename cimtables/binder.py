@@ -125,7 +125,7 @@ def _bind_row(network: GraphModel, row: object, obj: object, container: object, 
             continue
         if update and f.name not in obj.__dataclass_fields__ and f.name != synthetic.WKT_COLUMN:
             raise ValueError(f"Update {row.mRID!r}: {f.name!r} is connectivity shorthand; set it where the object is defined")
-        if update and getattr(obj, f.name) is not None and not isinstance(getattr(obj, f.name), list):
+        if update and f.name != synthetic.WKT_COLUMN and getattr(obj, f.name) is not None and not isinstance(getattr(obj, f.name), list):
             raise ValueError(f"Update {row.mRID!r}: {f.name} is already set ({getattr(obj, f.name)!r}); an Update only adds")
 
         if f.name == synthetic.WKT_COLUMN:
@@ -221,6 +221,12 @@ def _bind_wkt(network: GraphModel, obj: object, mrid: str, wkt_text: str) -> Non
     loc = cim.Location(mRID=f'{mrid}_loc')
     graph_write.add_to_graph(network, loc)
     graph_write.set_assc(obj, cim, 'Location', loc)
+    # Wire up a CoordinateSystem if one is already in the graph (declared before wkt rows).
+    crs_cls = getattr(cim, 'CoordinateSystem', None)
+    if crs_cls is not None:
+        existing_crs = next(iter(network.graph.get(crs_cls, {}).values()), None)
+        if existing_crs is not None and hasattr(loc, 'CoordinateSystem'):
+            graph_write.set_assc(loc, cim, 'CoordinateSystem', existing_crs)
 
     for seq, coord in enumerate(geom.coordinates):
         pp = cim.PositionPoint()

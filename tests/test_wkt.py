@@ -103,7 +103,7 @@ def network(cim):
 
 def _bind(network, text):
     records, _ = parser.parse_text(text, source_file='<test>')
-    return [bind_row(network, validate.validate(r)) for r in records]
+    return [bind_row(network, validate.validate(r), update=(r.form == 'Update')) for r in records]
 
 
 def test_point_wkt_creates_location_and_one_position_point(network, cim):
@@ -175,3 +175,16 @@ def test_wkt_unsupported_type_raises_with_file_line(network, cim):
             'Table ACLineSegment: mRID, node1, node2, wkt\n'
             '    line6, 650, 632, "POLYGON ((0 0, 1 0, 1 1, 0 0))"\n'
         ))
+
+
+def test_wkt_on_update_row_adds_location(network, cim):
+    # An Update Table row with wkt should add a Location to an already-defined object.
+    _bind(network, (
+        'Table ACLineSegment: mRID, node1, node2\n'
+        '    upd_line, 650, 632\n'
+        'Update Table ACLineSegment: mRID, wkt\n'
+        '    upd_line, "LINESTRING (-72.3 44.6, -72.4 44.7)"\n'
+    ))
+    line = graph_write.resolve(network, cim.ACLineSegment, 'upd_line')
+    assert line.Location is not None
+    assert len(line.Location.PositionPoints) == 2

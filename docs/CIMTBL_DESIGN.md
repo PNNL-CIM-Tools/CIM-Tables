@@ -390,7 +390,11 @@ quoted empty, optional comments on documents, tables and rows). Turning typed va
 - table rows are indented 4 spaces, and each cell but the last is padded after its comma to the column's widest
   cell;
 - a cell is quoted if it holds any of `,()#"`, has leading or trailing whitespace, is `''`, or starts like a
-  statement; a newline raises.
+  statement; a newline raises;
+- a row comment goes on its own `#` lines above the row. A `Table(..., footnotes=True)` instead lists each
+  distinct row comment once, as `# note N:` lines above its header (numbered in order of first use), and ends
+  each commented row with `# note N`. This is for large generated tables whose rows share a few notes. It is off
+  by default, so existing goldens don't change.
 
 `write_documents(DocumentSet(master, parts), dir)` writes `<name>.cimtbl` for each document (UTF-8, `\n`) and
 returns the master's path. It writes nothing if a name repeats, an Import is unknown, a part is never imported, or
