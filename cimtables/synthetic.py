@@ -16,8 +16,10 @@ CONNECTIVITY_COLUMNS: dict[str, tuple[str, int]] = {
 }
 
 # phases (same on every terminal) or phaseSide1 + phaseSide2 (a SwitchPhase
-# switch whose sides differ) -> connectivity.add_phase_children.
-PHASE_COLUMNS = ('phases', 'phaseSide1', 'phaseSide2')
+# switch whose sides differ), optionally with sequenceNumbers (the children's
+# sequenceNumber, space-separated, in child order; blank = 1..n)
+# -> connectivity.add_phase_children.
+PHASE_COLUMNS = ('phases', 'phaseSide1', 'phaseSide2', 'sequenceNumbers')
 
 # wkt: a WKT geometry string (POINT or LINESTRING) for the row's PowerSystemResource.
 # The binder creates a Location and one PositionPoint per coordinate, keyed from the

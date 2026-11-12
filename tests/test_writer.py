@@ -193,3 +193,23 @@ def test_unknown_terminal_mode_raises(tmp_path):
 def test_cimhub_ieee13_round_trips(tmp_path, terminals):
     original = cimtables.load_model(_GOLDEN)
     assert diff_models(original, _reload(tmp_path, writer.to_documents(original, 'ieee13', terminals=terminals))) == []
+
+
+_SPACING_LINES = '''Profile = cim18v17
+Object BaseVoltage: mRID=bv_12, nominalVoltage (kV)=12.47
+Table ACLineSegment: mRID, node1, node2, phases, sequenceNumbers, BaseVoltage
+    ln_c1, n1, n2, CB,   ,         bv_12
+    ln_c3, n1, n3, ABCN, 8 9 10 4, bv_12
+    ln_s1, n3, m1, AN,   1 4,      bv_12
+'''
+
+
+def test_folded_writes_sequence_numbers_only_where_not_1_to_n(tmp_path):
+    original = _load(tmp_path, _SPACING_LINES)
+    documents = writer.to_documents(original, 'm')
+    text = document.format_document(documents.master)
+    assert 'Phase:' not in text
+    assert 'ln_c1, n1, n2, CB,   ,' in text  # 1..n: written order kept, no numbers
+    assert 'ln_c3, n1, n3, ABCN, 8 9 10 4,' in text
+    assert 'ln_s1, n3, m1, AN,   1 4,' in text
+    assert diff_models(original, _reload(tmp_path, documents)) == []

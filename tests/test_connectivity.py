@@ -337,3 +337,42 @@ def test_differing_sides_on_single_phase_child_class_raises(network):
 
     with pytest.raises(ValueError, match="can't differ"):
         connectivity.add_phase_children(network, line, terminals, phaseSide1='AB', phaseSide2='AC')
+
+
+def test_sequence_numbers_number_the_children_in_token_order(network):
+    line = cim.ACLineSegment(mRID='ln_c3')
+    graph_write.add_to_graph(network, line)
+    terminals = connectivity.add_connectivity(network, line, node_cols={'node1': 'n1', 'node2': 'n3'})
+
+    children = connectivity.add_phase_children(network, line, terminals, phases='ABCN', sequenceNumbers='8 9 10 4')
+
+    assert [(c.mRID, c.sequenceNumber) for c in children] == [
+        ('ln_c3_A', 8), ('ln_c3_B', 9), ('ln_c3_C', 10), ('ln_c3_N', 4),
+    ]
+    assert [t.phases for t in terminals] == [cim.PhaseCode.ABCN, cim.PhaseCode.ABCN]
+
+
+@pytest.mark.parametrize('cells, match', [
+    ({'phases': 'ABCN', 'sequenceNumbers': '8 9 10'}, 'must be 4 distinct'),
+    ({'phases': 'AN', 'sequenceNumbers': '4 4'}, 'must be 2 distinct'),
+    ({'phases': 'AN', 'sequenceNumbers': '0 4'}, 'must be 2 distinct'),
+    ({'phases': 'AN', 'sequenceNumbers': '1 -4'}, 'must be 2 distinct'),
+    ({'phases': 'AN', 'sequenceNumbers': '1,4'}, 'must be 2 distinct'),
+    ({'sequenceNumbers': '1 4'}, 'needs a phases'),
+])
+def test_sequence_numbers_misuse_raises(network, cells, match):
+    line = cim.ACLineSegment(mRID='ln1')
+    graph_write.add_to_graph(network, line)
+    terminals = connectivity.add_connectivity(network, line, node_cols={'node1': '671', 'node2': '672'})
+
+    with pytest.raises(ValueError, match=match):
+        connectivity.add_phase_children(network, line, terminals, **cells)
+
+
+def test_sequence_numbers_on_a_child_class_without_one_raises(network):
+    load = cim.EnergyConsumer(mRID='ld1')
+    graph_write.add_to_graph(network, load)
+    terminals = connectivity.add_connectivity(network, load, node_cols={'node': '671'})
+
+    with pytest.raises(ValueError, match='EnergyConsumerPhase has no sequenceNumber'):
+        connectivity.add_phase_children(network, load, terminals, phases='AN', sequenceNumbers='1 4')

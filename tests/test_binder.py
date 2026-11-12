@@ -262,3 +262,19 @@ def test_second_base_power_must_agree(network):
 def test_base_power_without_a_value_raises(network):
     with pytest.raises(ValueError, match="BasePower 'sbase' has no basePower"):
         _bind_text(network, 'Object BasePower: mRID=sbase\n')
+
+
+def test_sequence_numbers_column_numbers_the_phase_children(network):
+    _bind_text(network, (
+        'Table ACLineSegment: mRID, node1, node2, phases, sequenceNumbers\n'
+        '    ln_c1, n1, n2, ABCN,  \n'
+        '    ln_c3, n1, n3, ABCN,  8 9 10 4\n'
+        '    ln_s1, n3, m1, s1s2N, 5 6 7\n'
+    ))
+    numbers = {mrid: [(p.phase.value, p.sequenceNumber) for p in graph_write.resolve(network, cim.ACLineSegment, mrid).ACLineSegmentPhases]
+               for mrid in ('ln_c1', 'ln_c3', 'ln_s1')}
+    assert numbers == {
+        'ln_c1': [('A', 1), ('B', 2), ('C', 3), ('N', 4)],  # blank: 1..n
+        'ln_c3': [('A', 8), ('B', 9), ('C', 10), ('N', 4)],
+        'ln_s1': [('s1', 5), ('s2', 6), ('N', 7)],
+    }

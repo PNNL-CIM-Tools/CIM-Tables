@@ -209,6 +209,14 @@ the missing ones in after loading. `phases=ABC` means three separate phases, a p
 - One `<Class>Phase` child is made per token, carrying the normative `SinglePhaseKind` and a `sequenceNumber`
   where the class has one. The child class is found by walking the MRO (`LinearShuntCompensator` →
   `LinearShuntCompensatorPhase`, `Breaker` → `SwitchPhase`). Children are named `<mRID>_<phase>`.
+- **`sequenceNumbers`** beside `phases` (or `phaseSide1`/`phaseSide2`) gives the children's `sequenceNumber`
+  instead of 1..n: space-separated, one per child in child order, e.g. `phases=ABCN, sequenceNumbers=8 9 10 4`.
+  It is for a line on a shared `WireSpacing`, whose positions are numbered once for the spacing (the second
+  circuit of a double-circuit span on 8/9/10 with the shared neutral on 4, a triplex secondary `s1s2N` on
+  5/6/7); CIMHub-gis places each conductor by its `ACLineSegmentPhase.sequenceNumber`. A blank cell is 1..n.
+  A count that differs from the children, a repeated number, a number below 1, the column without `phases`, or
+  a child class with no `sequenceNumber` (cim18v17: only `ACLineSegmentPhase` / `WireSegmentPhase` have one)
+  raises.
 - **Delta shunts** (`phaseConnection=D`) get one child per line-to-line branch, `N` ignored. The child's
   `phase` is the from-phase (normative CIM: "connected from the indicated phase to the next logical non-neutral
   phase", A→B→C→A, s1→s2). Where the class has the `phases` extension (cim18v17 `EnergyConsumerPhase`), it also
@@ -314,7 +322,7 @@ unit.
 | Field | Goes to |
 |---|---|
 | a connectivity column | `connectivity.add_connectivity` |
-| `phases` / `phaseSide1` / `phaseSide2` | `connectivity.add_phase_children` |
+| `phases` / `phaseSide1` / `phaseSide2` / `sequenceNumbers` | `connectivity.add_phase_children` |
 | `EquipmentContainer` | resolved, then used as the container |
 | any other reference | resolved, then `set_assc` (an unresolved mRID raises) |
 | a relative `Qty` | `set_attr`, deferred to the end |
@@ -413,7 +421,7 @@ shapes, units or split, so the writer chooses them.
   blank cell is unset.
 - **Terminals, folded (the default).** An equipment's Terminals become its `node`/`node1`/`node2` and
   `bus`/`bus1`/`bus2` columns, and its `<Class>Phase` children its `phases` (or `phaseSide1`/`phaseSide2`)
-  column, wherever binding that row makes exactly them: the writer reads a candidate cell off the children and
+  column, plus `sequenceNumbers` (phases in canonical order) where the children aren't numbered 1..n, wherever binding that row makes exactly them: the writer reads a candidate cell off the children and
   compares them with `connectivity.phase_plan`, the same plan `add_phase_children` builds from. A
   `TransformerEnd` takes its own Terminal as `node` (and `phases`). Folded objects get binding's generated mRIDs
   (`<mRID>_T<n>`, `<mRID>_<phase>`), so their mRIDs and UUIDs change, and references to them follow; their other

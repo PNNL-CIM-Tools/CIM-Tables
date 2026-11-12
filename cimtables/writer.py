@@ -9,7 +9,8 @@ written that the model doesn't hold: a blank cell is an unset attribute.
 Terminals, two modes:
 - 'folded' (default): an equipment's Terminals become its node/node1/node2
   and bus/bus1/bus2 columns, and its <Class>Phase children a phases (or
-  phaseSide1/phaseSide2) column, wherever binding that row would make exactly
+  phaseSide1/phaseSide2) column, plus sequenceNumbers where they aren't
+  numbered 1..n, wherever binding that row would make exactly
   them (connectivity.phase_plan). A TransformerEnd takes its own Terminal as
   `node`. The folded objects get binding's generated mRIDs (`<mRID>_T<n>`,
   `<mRID>_<phase>`), so their mRIDs and UUIDs change; references to them
@@ -222,10 +223,16 @@ def _fold_phases(cim, equipment, terminals: list) -> tuple[dict, list] | None:
     phase_fields = ('phaseSide1', 'phaseSide2') if has_sides else ('phase',)
     if any(getattr(child, field) is None for child in children for field in phase_fields):
         return None
+    children = sorted(children, key=lambda child: connectivity.PHASE_ORDER.index(getattr(child, phase_fields[0]).value))
+    sequence_numbers = None  # the sequenceNumbers cell, for children not numbered 1..n
     if 'sequenceNumber' in hints:
-        children = sorted(children, key=lambda child: child.sequenceNumber or 0)
-    else:
-        children = sorted(children, key=lambda child: connectivity.PHASE_ORDER.index(getattr(child, phase_fields[0]).value))
+        numbers = [child.sequenceNumber for child in children]
+        if None in numbers:
+            return None
+        if sorted(numbers) == list(range(1, len(numbers) + 1)):
+            children = sorted(children, key=lambda child: child.sequenceNumber)  # 1..n: written order is the sequence
+        else:
+            sequence_numbers = ' '.join(str(number) for number in numbers)
     if has_sides:
         side1 = ''.join(child.phaseSide1.value for child in children)
         side2 = ''.join(child.phaseSide2.value for child in children)
@@ -238,6 +245,8 @@ def _fold_phases(cim, equipment, terminals: list) -> tuple[dict, list] | None:
         cells = {'phases': ''.join(from_phases + rest)}
     else:
         cells = {'phases': ''.join(child.phase.value for child in children)}
+    if sequence_numbers is not None:
+        cells['sequenceNumbers'] = sequence_numbers
 
     try:
         want_codes, _, plan = connectivity.phase_plan(cim, equipment, len(terminals), **cells)

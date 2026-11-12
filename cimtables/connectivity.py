@@ -186,7 +186,8 @@ NEXT_PHASE = {'A': 'B', 'B': 'C', 'C': 'A', 's1': 's2'}
 
 
 def phase_plan(cim: CN, obj: object, terminal_count: int, *, phases: str | None = None,
-               phaseSide1: str | None = None, phaseSide2: str | None = None
+               phaseSide1: str | None = None, phaseSide2: str | None = None,
+               sequenceNumbers: str | None = None
                ) -> tuple[list[str], type | None, list[tuple[str, dict]]]:
     """What a phases (or phaseSide1 + phaseSide2) cell makes on obj, without
     making it: (the PhaseCode value of each terminal, the child class, and
@@ -202,7 +203,10 @@ def phase_plan(cim: CN, obj: object, terminal_count: int, *, phases: str | None 
     PhaseCode, terminal 2 side 2's.
 
     Every child gets the normative SinglePhaseKind (`phase`, or SwitchPhase's
-    phaseSide1/phaseSide2) and a sequenceNumber where the class has one:
+    phaseSide1/phaseSide2) and a sequenceNumber where the class has one
+    (1..n in child order, or sequenceNumbers='8 9 10 4': one distinct number
+    >= 1 per child, for a line whose positions on a shared WireSpacing aren't
+    1..n; it needs a phases column and a child class with a sequenceNumber):
     - default (wye, lines, switches): one child per token in written order.
     - delta shunt (phaseConnection=D): one child per line-to-line branch, whose
       `phase` is the branch's from-phase (normative CIM: "connected from the
@@ -211,6 +215,8 @@ def phase_plan(cim: CN, obj: object, terminal_count: int, *, phases: str | None 
       on BC is one child phase=B, phases=BC; on CA it's phase=C, phases=AC."""
     if not terminal_count:
         raise ValueError(f"{obj.mRID!r}: a phases column needs a node/bus column to put the phases on")
+    if sequenceNumbers is not None and phases is None and phaseSide1 is None and phaseSide2 is None:
+        raise ValueError(f"{obj.mRID!r}: a sequenceNumbers column needs a phases (or phaseSide1/phaseSide2) column")
     if phases is not None and (phaseSide1 is not None or phaseSide2 is not None):
         raise ValueError(f"{obj.mRID!r}: give either phases or phaseSide1/phaseSide2, not both")
     if isinstance(obj, cim.TransformerEnd) and 'phase' in graph_write.type_hints(type(obj)):
@@ -229,6 +235,8 @@ def phase_plan(cim: CN, obj: object, terminal_count: int, *, phases: str | None 
             )
         codes = [phase_code(tokens), phase_code(side2_tokens)]
     if isinstance(obj, cim.TransformerEnd):
+        if sequenceNumbers is not None:
+            raise ValueError(f"{obj.mRID!r}: a TransformerEnd has no <Class>Phase children for a sequenceNumbers column")
         return codes, None, []  # an end's phases live on its terminal only
 
     child_cls = phase_cls(cim, obj)
@@ -256,21 +264,35 @@ def phase_plan(cim: CN, obj: object, terminal_count: int, *, phases: str | None 
     else:
         children = [(f'{obj.mRID}_{t}', {'phase': cim.SinglePhaseKind(t)}) for t in tokens]
 
-    if 'sequenceNumber' in child_hints:
-        for i, (_, fields) in enumerate(children, start=1):
-            fields['sequenceNumber'] = i
+    if 'sequenceNumber' not in child_hints:
+        if sequenceNumbers is not None:
+            raise ValueError(f"{obj.mRID!r}: {child_cls.__name__} has no sequenceNumber for a sequenceNumbers column")
+        return codes, child_cls, children
+    numbers = list(range(1, len(children) + 1))
+    if sequenceNumbers is not None:
+        words = sequenceNumbers.split()
+        numbers = [int(word) for word in words] if all(word.isdecimal() for word in words) else []
+        if len(numbers) != len(children) or len(set(numbers)) != len(numbers) or 0 in numbers:
+            raise ValueError(
+                f"{obj.mRID!r}: sequenceNumbers {sequenceNumbers!r} must be {len(children)} distinct "
+                f"whole numbers >= 1, one per {child_cls.__name__}"
+            )
+    for number, (_, fields) in zip(numbers, children):
+        fields['sequenceNumber'] = number
     return codes, child_cls, children
 
 
 def add_phase_children(network: GraphModel, obj: CN.ConductingEquipment, terminals: list[CN.Terminal], *,
                        phases: str | None = None, phaseSide1: str | None = None,
-                       phaseSide2: str | None = None) -> list[CN.PowerSystemResource]:
-    """phases='ABCN' (or phaseSide1 + phaseSide2) -> per-phase children (e.g.
-    ACLineSegmentPhase) wired to obj, and every terminal's PhaseCode, as
-    phase_plan describes. Returns the children (none on a TransformerEnd)."""
+                       phaseSide2: str | None = None,
+                       sequenceNumbers: str | None = None) -> list[CN.PowerSystemResource]:
+    """phases='ABCN' (or phaseSide1 + phaseSide2, either with an optional
+    sequenceNumbers) -> per-phase children (e.g. ACLineSegmentPhase) wired to
+    obj, and every terminal's PhaseCode, as phase_plan describes. Returns the
+    children (none on a TransformerEnd)."""
     cim = network.cim
-    codes, child_cls, plan = phase_plan(cim, obj, len(terminals), phases=phases,
-                                        phaseSide1=phaseSide1, phaseSide2=phaseSide2)
+    codes, child_cls, plan = phase_plan(cim, obj, len(terminals), phases=phases, phaseSide1=phaseSide1,
+                                        phaseSide2=phaseSide2, sequenceNumbers=sequenceNumbers)
     for terminal, code in zip(terminals, codes):
         graph_write.set_attr(terminal, cim, 'phases', cim.PhaseCode(code))
     if child_cls is None:

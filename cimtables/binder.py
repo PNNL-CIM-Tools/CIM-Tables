@@ -9,8 +9,9 @@ of these buckets:
 - a connectivity column (synthetic.CONNECTIVITY_COLUMNS: node/node1/node2
   -> node_cols, bus/bus1/bus2 -> bus_cols; both may be given) -> passed to
   connectivity.add_connectivity
-- the synthetic `phases` / `phaseSide1` + `phaseSide2` shorthand (only
-  where the class has no real attribute of that name) ->
+- the synthetic `phases` / `phaseSide1` + `phaseSide2` shorthand, with
+  its optional `sequenceNumbers` (only where the class has no real
+  attribute of that name) ->
   connectivity.add_phase_children: Terminal.phases
   plus <Class>Phase children
 - EquipmentContainer -> resolved by mRID via graph_write.resolve (its range is
