@@ -346,8 +346,9 @@ into new shards and classifies it:
 | Crosses or moves a boundary | Both shards and the boundary table, in one atomic swap |
 
 The first version treats a case as edited `.cimtbl` text and lets the hash cache find the changed shards.
-Accepting a CIM difference message directly needs a way to apply one to a bound model, which `cimtables` does not
-have: `Update` is additive only.
+A CIM difference message is the other input: cim-graph applies one through `GraphModel.from_difference`, and the
+changed shards are then lowered from the resulting model. `.cimtbl`'s own `Update` is additive only and is not a
+difference form. How a difference message is routed to the shards it touches is still to be designed.
 
 Re-staging one feeder is estimated at seconds to tens of seconds at the current bind rate; the swap itself at
 milliseconds.
@@ -360,7 +361,7 @@ their own.
 - **Placing a cut or clamp is structural.** It splits a segment at a distance along it and adds an internal node.
   Lowering does this as plain segment splitting with length-proportional impedance, so the kernel sees shorter
   lines.
-- **Operating one is a runtime update.** `Cut` and `Jumper` are believed to be `Switch` subclasses, with `Clamp`
+- **Operating one is a runtime update.** `Cut` and `Jumper` are `Switch` subclasses, with `Clamp`
   as the attachment point; once placed they are ordinary [switch constraint rows](#switches-as-constraint-rows).
 - **Coupled circuits.** A cut on one circuit of a shared spacing splits the whole coupled group at that point.
 - **A jumper between two feeders** breaks the static-shard rule unless a boundary is declared there. It goes
@@ -429,8 +430,9 @@ These are gaps today.
 - **Bind speed.** Binding is measured at roughly 3,300 to 3,900 rows per second. A state-sized model is hours
   serially, so staging must be parallel across shards and cached by hash.
 - **Profile extensions.** `Switch.isBoundary` and `ConnectedArea.ContainedWithin`.
-- **Applying a difference message.** Needed only to accept CIM difference messages for
-  [what-if cases](#what-if-cases-by-shard-swap); edited text works without it.
+- **Difference messages per shard.** cim-graph has `GraphModel.from_difference`; what is missing is routing a
+  message to the shards it touches and re-staging only those, for
+  [what-if cases](#what-if-cases-by-shard-swap). Edited text works without it.
 
 ## Deferred
 
@@ -439,7 +441,7 @@ These are gaps today.
   discrete control).
 - STATCOM, HVDC, SVC, phase shifters and other equipment outside the basic list.
 - `Cut`, `Clamp` and `Jumper`, which depend on the shard swap.
-- CIM difference messages as the input to a what-if case.
+- CIM difference messages as the input to a what-if case, after edited text.
 - Coupling by sensitivity (the optional term in the shard interface).
 - Distributed-memory solves.
 - Droop on distribution DER.
@@ -454,6 +456,5 @@ These are gaps today.
 - Do the ENTSO-E frame and boundary drafts map onto the manifest and boundary file as assumed?
 - Does the reuse of symbolic analysis across switch status changes hold in practice with KLU?
 - What are the validation tolerances against OpenDSS and GridPACK?
-- Are `Cut` and `Jumper` `Switch` subclasses in cim18v17, as assumed?
 - Does a planning deployment carry the build stage in its image, or run a separate staging service?
 - Where does the solver live: which repository and package name?
