@@ -32,7 +32,8 @@ assembly to text composition. The solver is designed around that:
   belongs to an external stepping driver.
 - A native C implementation of `.cimtbl`. The format's semantics stay in `cimtables`; see
   [Technology stack](#technology-stack).
-- Equipment changes at runtime. They go through the build; see [Build time and runtime](#build-time-and-runtime).
+- Equipment changes inside a running solve. They go through the build, or between solves through a
+  [shard swap](#what-if-cases-by-shard-swap); see [Build time and runtime](#build-time-and-runtime).
 
 ## Architecture
 
@@ -60,13 +61,14 @@ equipment changes arrive through a nightly build.
 
 | | Build time | Runtime |
 |---|---|---|
-| Equipment changes (a line impedance, new equipment) | Applied to the `.cimtbl` text; changed shards re-staged | Not supported |
+| Equipment changes (a line impedance, new equipment) | Applied to the `.cimtbl` text; changed shards re-staged | Only as a shard swap between solves |
 | Operating-point changes (breaker status, taps, load and generation P/Q, setpoints) | Initial values staged | Applied as updates |
 | Bad data | Shard quarantined, see [Lowering](#lowering) | Shard carries a failed status |
 | Tools present | Python, `cimtables`, lowering | Kernel and shards only |
 
 A what-if equipment change, such as adding a line in a planning study, means building a variant. The per-shard
-hash limits the rebuild to the shards that changed.
+hash limits the rebuild to the shards that changed, and the variant is put in service by a
+[shard swap](#what-if-cases-by-shard-swap).
 
 The deliverable is a container image with every shard already staged. A two-stage image keeps Python out of the
 runtime stage.
@@ -308,6 +310,65 @@ Runtime updates are operating-point changes only.
 A solve needs a fixed view of the operating point while updates arrive; updates create a new version rather than
 mutating in place.
 
+## What-if cases by shard swap
+
+Planning needs a snapshot power flow between what-if cases. The kernel's contract for this is a shard swap. The
+kernel never interprets a difference message; the model compiler does, and the kernel only sees the resulting
+shards.
+
+### The kernel contract
+
+- **Request.** The root hash the change applies to, and a map of shard id to new shard hash. The map may add or
+  remove shards and may carry a new boundary table.
+- **Sequence.** Stop accepting solves and let the running one finish; verify the base hash; load and check the new
+  shards; swap; start.
+- **Atomic.** If any new shard fails its check, nothing changes and the previous case stays in service.
+- **Reversible.** Shards are kept in a content-addressed store, so returning to a case is a swap to its hashes.
+  The kernel needs no reverse differences. Cases share every shard they did not change.
+
+### What carries over a swap
+
+- **Untouched shards** keep their factors and solution.
+- **Swapped shards** warm-start by mRID where nodes survive and cold-start otherwise.
+- **The operating point** is rebound by mRID. Entries for removed equipment are dropped with a warning; new
+  equipment takes its staged values.
+- **Results** are stamped with the new root hash.
+
+### The compiler side
+
+A planning deployment includes the build stage, or runs a staging service beside the kernel. It turns a change
+into new shards and classifies it:
+
+| Change | Result |
+|---|---|
+| Operating point only | No swap; an ordinary [runtime update](#runtime-updates) |
+| Equipment inside one shard | That shard is re-staged |
+| Crosses or moves a boundary | Both shards and the boundary table, in one atomic swap |
+
+The first version treats a case as edited `.cimtbl` text and lets the hash cache find the changed shards.
+Accepting a CIM difference message directly needs a way to apply one to a bound model, which `cimtables` does not
+have: `Update` is additive only.
+
+Re-staging one feeder is estimated at seconds to tens of seconds at the current bind rate; the swap itself at
+milliseconds.
+
+## Cuts, clamps and jumpers
+
+They are supported only through the shard swap, never as a runtime operation, and need no kernel concept of
+their own.
+
+- **Placing a cut or clamp is structural.** It splits a segment at a distance along it and adds an internal node.
+  Lowering does this as plain segment splitting with length-proportional impedance, so the kernel sees shorter
+  lines.
+- **Operating one is a runtime update.** `Cut` and `Jumper` are believed to be `Switch` subclasses, with `Clamp`
+  as the attachment point; once placed they are ordinary [switch constraint rows](#switches-as-constraint-rows).
+- **Coupled circuits.** A cut on one circuit of a shared spacing splits the whole coupled group at that point.
+- **A jumper between two feeders** breaks the static-shard rule unless a boundary is declared there. It goes
+  through the two-shard swap, or it raises.
+- **Reassigning a span to another feeder** is a boundary move: both shards and the boundary table in one swap.
+
+Until the swap exists, `Cut`, `Clamp` and `Jumper` raise as unmodelled; see [Deferred](#deferred).
+
 ## Persistence and hashing
 
 Only the IR is persisted. Primitive matrices, star reductions, the assembled matrix, the ordering and the factors
@@ -368,6 +429,8 @@ These are gaps today.
 - **Bind speed.** Binding is measured at roughly 3,300 to 3,900 rows per second. A state-sized model is hours
   serially, so staging must be parallel across shards and cached by hash.
 - **Profile extensions.** `Switch.isBoundary` and `ConnectedArea.ContainedWithin`.
+- **Applying a difference message.** Needed only to accept CIM difference messages for
+  [what-if cases](#what-if-cases-by-shard-swap); edited text works without it.
 
 ## Deferred
 
@@ -375,6 +438,8 @@ These are gaps today.
 - Spot networks and area grid networks (shards with several boundaries; network protectors as a directional
   discrete control).
 - STATCOM, HVDC, SVC, phase shifters and other equipment outside the basic list.
+- `Cut`, `Clamp` and `Jumper`, which depend on the shard swap.
+- CIM difference messages as the input to a what-if case.
 - Coupling by sensitivity (the optional term in the shard interface).
 - Distributed-memory solves.
 - Droop on distribution DER.
@@ -389,4 +454,6 @@ These are gaps today.
 - Do the ENTSO-E frame and boundary drafts map onto the manifest and boundary file as assumed?
 - Does the reuse of symbolic analysis across switch status changes hold in practice with KLU?
 - What are the validation tolerances against OpenDSS and GridPACK?
+- Are `Cut` and `Jumper` `Switch` subclasses in cim18v17, as assumed?
+- Does a planning deployment carry the build stage in its image, or run a separate staging service?
 - Where does the solver live: which repository and package name?
