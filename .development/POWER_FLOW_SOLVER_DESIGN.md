@@ -346,9 +346,19 @@ into new shards and classifies it:
 | Crosses or moves a boundary | Both shards and the boundary table, in one atomic swap |
 
 The first version treats a case as edited `.cimtbl` text and lets the hash cache find the changed shards.
-A CIM difference message is the other input: cim-graph applies one through `GraphModel.from_difference`, and the
-changed shards are then lowered from the resulting model. `.cimtbl`'s own `Update` is additive only and is not a
-difference form. How a difference message is routed to the shards it touches is still to be designed.
+A CIM difference message is the other input. cim-graph applies one with `GraphModel.from_incremental` (the name
+in cim-graph 0.6.0; it reads an RDF/XML difference file):
+
+- Every difference is checked before any is applied, and nothing changes if one does not fit the model. This
+  matches the swap's all-or-nothing rule.
+- It returns the created and modified objects, and `model.incrementals` holds the forward and reverse differences
+  by class and object, deletions included. That is the list of touched objects from which the affected shards are
+  found.
+- A reverse value that disagrees with the model is only a warning, so it does not prove the message was made
+  against this version. The base hash in the swap request is the guard.
+
+The changed shards are then lowered from the resulting model. `.cimtbl`'s own `Update` is additive only and is
+not a difference form. How a message is routed to per-shard bound models is still to be designed.
 
 Re-staging one feeder is estimated at seconds to tens of seconds at the current bind rate; the swap itself at
 milliseconds.
@@ -430,7 +440,7 @@ These are gaps today.
 - **Bind speed.** Binding is measured at roughly 3,300 to 3,900 rows per second. A state-sized model is hours
   serially, so staging must be parallel across shards and cached by hash.
 - **Profile extensions.** `Switch.isBoundary` and `ConnectedArea.ContainedWithin`.
-- **Difference messages per shard.** cim-graph has `GraphModel.from_difference`; what is missing is routing a
+- **Difference messages per shard.** cim-graph has `GraphModel.from_incremental`; what is missing is routing a
   message to the shards it touches and re-staging only those, for
   [what-if cases](#what-if-cases-by-shard-swap). Edited text works without it.
 
