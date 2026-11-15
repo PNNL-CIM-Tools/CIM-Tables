@@ -93,6 +93,10 @@ a file named twice, and an assembly naming another assembly all raise `CimtblPar
 - A frame or boundary whose `Profile =` differs from the assembly's raises.
 - Loading a model applies its own scope while its rows bind, including to boundary rows (see S5), and loading a
   second model in the same process is not affected by the first.
+- An empty model scope can be written. Today leaving `Model =` out leaves the process-global scope as it was, so
+  a file cannot say "no model name". Where a utility's keys are unique across the utility, every frame and
+  boundary shares one scope, and a boundary node then has the same UUID in every model with no special handling
+  (see S6).
 
 ### S3. Boundary models hold connectivity nodes only
 
@@ -264,12 +268,42 @@ assembly has no place for an object that belongs to no frame.
 **Met when.** The settings load without any frame, a second `PowerFlowSettings` in the assembly raises, and a
 frame loads identically with or without a settings file.
 
+### S16. Reference models
+
+**Need.** Objects every frame may point at and that belong to no frame: `BaseVoltage`, `BasePower`,
+`CoordinateSystem`, wire and equipment catalogues, and `PowerFlowSettings` (which makes S15 a case of this).
+Frames must not each declare their own copy, or two frames cannot be bound together.
+
+**Today.** A shared file can be imported by several masters, but each load then declares the objects again under
+that master's scope.
+
+**Proposal.** A `Reference <file>.cimtbl` entry in the assembly. It is bound before any boundary or frame, and
+may refer only to other reference models.
+
+**Met when.** A frame referring to a reference object loads alone (S5) with the reference model bound first; a
+frame that declares an mRID the reference model declares raises; and a reference model that refers to a frame
+or boundary object raises.
+
+### S17. Edge models
+
+**Need.** A model that puts an artificial source on a boundary node, standing in for a frame left out of an
+assembly. A feeder frame has no source of its own, since the head device and source are in the substation frame,
+so it loads and solves alone only with one.
+
+**Today.** Nothing distinguishes such a file.
+
+**Proposal.** An `Edge <file>.cimtbl for <frame>` entry. An edge model may refer to the nodes of exactly one
+boundary model and to reference models.
+
+**Met when.** An assembly that names a frame and an edge model for the same frame raises, and an edge model that
+touches two boundaries raises.
+
 ## Order of work
 
 1. S1, S2, S3, S6: the assembly file and boundary models. Nothing else can be tried without them.
 2. S4, S5, S7, S8: loading and checking a frame alone. This unblocks the solver's lowering step.
 3. S10: the file list for hashing.
-4. S9, S14, S15: situation files, computed-topology files and solver settings.
+4. S9, S14, S15, S16, S17: situation files, computed-topology files, solver settings, reference and edge models.
 5. S13: migration of existing models.
 6. S12: difference messages.
 7. S11: only if measured staging time requires it.
@@ -290,8 +324,8 @@ has all of them:
 ## Open questions
 
 - **Boundary node containers.** May a boundary `ConnectivityNode` name a `ConnectivityNodeContainer`? The
-  container would have to be declared in the boundary too, which S3 forbids, or in a frame, which S4 forbids.
-  The simplest rule is that a boundary node has none.
+  Frameworks note recommends an artificial container declared in the boundary model itself, which S3 would then
+  have to allow. The alternative is that a boundary node has none.
 - **Unused boundary nodes** in a frame load: omitted or marked?
 - **Write-back for S12.** Regenerating a frame's text loses hand-written layout and comments in git-tracked
   models. The alternative is a row-level patch of the source files, which is a larger piece of work.
