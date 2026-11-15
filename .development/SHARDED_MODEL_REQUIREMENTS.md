@@ -24,6 +24,13 @@ The organisation is the frame and boundary scheme of the Great Britain Grid Code
 | Profile | Structural, Situation or Solution data | Structural rows; Situation as `Update` rows (see S9) |
 | Assembly | A collection of models for a purpose | An assembly file (see S1) |
 
+A boundary here is not a boundary of operating responsibility or ownership. A boundary node is a connectivity
+node that must be present in two frames so that they snap together when assembled.
+
+In the solver's use, a switch between two areas is declared in the frame of the area that contains both, and the
+nodes it shares with the contained areas are the boundary nodes. A feeder frame therefore references a boundary
+node at its head and one at each tie, and two feeder frames never reference each other's nodes.
+
 The rules that matter:
 
 - A boundary model holds only connectivity nodes. It has no equipment and so no operating-point data.
@@ -255,9 +262,6 @@ Binding is reflective, so these need no `cimtables` change beyond a test:
 - **Unused boundary nodes** in a frame load: omitted or marked?
 - **Write-back for S12.** Regenerating a frame's text loses hand-written layout and comments in git-tracked
   models. The alternative is a row-level patch of the source files, which is a larger piece of work.
-- **Which frame holds an across-area switch.** The solver design leaves open whether a boundary switch belongs
-  to the containing area or the contained one. Either way the interface node is a `ConnectivityNode` in the
-  boundary file, so S3 and S4 are unaffected; only which frame declares the switch row changes.
 - **Nested frames.** The solver nests shards by `ConnectedArea.ContainedWithin`. Whether an assembly may name
   another assembly, which S1 forbids for now, depends on whether nesting is expressed in files or only in
   instance data.
