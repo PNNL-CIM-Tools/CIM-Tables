@@ -403,6 +403,11 @@ quoted empty, optional comments on documents, tables and rows). Turning typed va
   distinct row comment once, as `# note N:` lines above its header (numbered in order of first use), and ends
   each commented row with `# note N`. This is for large generated tables whose rows share a few notes. It is off
   by default, so existing goldens don't change.
+- a `Table(..., commented_columns=[...])` writes columns the profile does not have yet (proposed attributes,
+  e.g. a datasheet column missing from the UML) after its header as `  # name (unit), ...`, and each row's
+  `Row(..., commented=[...])` cells after its last cell as `  # cell, ...`, aligned like the rest. The parser ignores
+  them. Once the profile gains the attributes, replacing each `  # ` with `, ` makes them real columns, so every row
+  writes every commented cell. A table with defaulted columns or footnotes cannot have them.
 
 `write_documents(DocumentSet(master, parts), dir)` writes `<name>.cimtbl` for each document (UTF-8, `\n`) and
 returns the master's path. It writes nothing if a name repeats, an Import is unknown, a part is never imported, or

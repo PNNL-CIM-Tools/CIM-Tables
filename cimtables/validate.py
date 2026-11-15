@@ -116,6 +116,21 @@ def _real_fields(cim_cls: type) -> dict[str, tuple[str, type]]:
     return classified
 
 
+def columns(class_name: str, *, profile: str | None = None) -> dict[str, tuple[str, type]]:
+    """{column: (kind, type)} for every attribute a .cimtbl row may set on the
+    CIM class (mRID/identifier and serialize=False reverse sides excluded).
+    kind is 'quantity' (type: its CIMUnit subclass), 'reference' (type: the
+    target CIM class) or 'scalar' (type: str/int/float/bool or an Enum).
+
+    Public for tools that build .cimtbl from foreign data (cimcatalog maps
+    datasheet columns onto these). Raises CimtblValidationError for a class
+    the profile does not have."""
+    cim_cls = getattr(_cim_module(profile), class_name, None)
+    if not (isinstance(cim_cls, type) and dataclasses.is_dataclass(cim_cls)):
+        raise CimtblValidationError(f'{class_name!r} is not a class in the CIM profile')
+    return dict(_real_fields(cim_cls))
+
+
 def reference_slots(row_cls_name: str, *, profile: str | None = None) -> set[str]:
     """Names of the class's FK slots - slots whose range is itself a CIM
     class (BaseVoltage, PerLengthImpedance, LoadResponse, ...) rather than a
