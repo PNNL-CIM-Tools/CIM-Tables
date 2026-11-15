@@ -233,26 +233,59 @@ raise.
 **Met when.** A model written as an assembly and loaded frame by frame compares equal, by `diff_models`, to the
 original within each frame.
 
+### S14. Computed topology as additive files
+
+**Need.** The areas are computed, not authored: `Switch.areaBoundary` is the input flag, and a topology processor
+derives the `ConnectedArea` objects, their nesting and `Terminal.BoundedConnectedArea`. The computed objects must
+be kept apart from the hand-written source, so that they can be regenerated without touching it.
+
+**Today.** `Update` rows already add to objects declared elsewhere, and `document.Table` writes them.
+
+**Proposal.** The processor's output is a generated `.cimtbl` file per frame: `ConnectedArea` rows, and
+`Update Terminal: mRID=<equipment>_T<n>, BoundedConnectedArea=...` rows on the generated terminals. It is bound
+after the frame, like a situation file (S9).
+
+**Met when.** A frame loads with or without its computed file; the computed file can be deleted and regenerated
+with no change to the source files; and a test covers `Update Terminal` on a generated terminal setting
+`BoundedConnectedArea`.
+
+### S15. Solver settings for an assembly
+
+**Need.** One `PowerFlowSettings` object for an assembly, readable without loading a frame. The solver takes its
+opt-in slack-bus mode from it (`slackDistributionKind = singleReferenceMachine`; the default is distributed
+slack by frequency droop), along with `flatStart`, iteration limits and tolerances.
+
+**Today.** `PowerFlowSettings` binds reflectively like any class, but every object belongs to some model, and an
+assembly has no place for an object that belongs to no frame.
+
+**Proposal.** A `Settings <file>.cimtbl` entry in the assembly, naming a file that may declare only
+`PowerFlowSettings`. It is loaded on its own.
+
+**Met when.** The settings load without any frame, a second `PowerFlowSettings` in the assembly raises, and a
+frame loads identically with or without a settings file.
+
 ## Order of work
 
 1. S1, S2, S3, S6: the assembly file and boundary models. Nothing else can be tried without them.
 2. S4, S5, S7, S8: loading and checking a frame alone. This unblocks the solver's lowering step.
 3. S10: the file list for hashing.
-4. S9: situation files.
+4. S9, S14, S15: situation files, computed-topology files and solver settings.
 5. S13: migration of existing models.
 6. S12: difference messages.
 7. S11: only if measured staging time requires it.
 
 ## From the profile, not `cimtables`
 
-Binding is reflective, so these need no `cimtables` change beyond a test:
+Binding is reflective, so these need no `cimtables` change beyond a test. As of cim-profiles 0.2.0a3, cim18v17
+has all of them:
 
-- `ConnectedArea.ContainedWithin`, `ConnectedArea.kind`, `Terminal.BoundedConnectedArea`, `Switch.areaBoundary`
-  and `Switch.topologicalUsage` are all in cim18v17 and serialized. A boundary terminal is normally a generated
-  one, so it is written as `Update Terminal: mRID=<equipment>_T<n>, BoundedConnectedArea=...`; that should be
-  covered by a test.
-- The draft UML's substation service area kind is not in cim18v17's `ConnectedAreaKind`. If it is wanted, it is
-  a request on CIM-Profiles.
+- `Switch.areaBoundary`, the input flag.
+- `ConnectedArea` with `kind` (including `substationServiceArea`) and `ContainedWithin`, and
+  `Terminal.BoundedConnectedArea`: computed, see S14.
+- `PowerFlowSettings`, see S15.
+
+`pyproject.toml` pins `cim-profiles<0.2`, so the pin must be raised to use them. The test suite passes against
+0.2.0a3 as it stands.
 
 ## Open questions
 
