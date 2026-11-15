@@ -62,6 +62,10 @@ Releases follow CIM-Profiles' chain (`.github/workflows/release.yml`): `pyprojec
 
 CIMHub's importers write `.cimtbl` artifacts and load them with this package; its open asks are in `/home/ande188/CIMHub/.development/UPSTREAM_REQUESTS.md`, and the behaviours it depends on are listed in `/home/ande188/CIMHub_2_0/cimhub_core/src/cimhub_core/development/CIMTABLES_REQUESTS.md` ("Please keep these stable"): generated names (`<mRID>_T<n>`, `<mRID>_<phase>`), Import resolution and setting merge, bind-time reference resolution, `load_model`'s model choice, the unit/base rules, cell semantics, `file:line[:col]` errors, `BasePower` semantics, and `document.py`'s layout (its goldens are diffed byte for byte). Flag any change to these here.
 
+## Downstream requirements (sharded solver)
+
+The sharded power flow solver (`PNNL-CIM-Tools/CIM-Sharded-Solver`, design in its `docs/DESIGN.md`) needs models organised as frames, boundaries and assemblies. Its requirements on this package are in `.development/SHARDED_MODEL_REQUIREMENTS.md` (proposed, none built); they are additive to the CIMHub contract above.
+
 ## Tests
 
 Tests target `cim18v17` only (cimhub_2026 and gmdm are out of scope). They set `os.environ['CIMG_CIM_PROFILE'] = 'cim18v17'` at module import, build an in-memory model (`connection=None`; cim-graph's `XMLFile` raises on a missing file, so never use one as a dummy), and parse real `.cimtbl` text rather than hand-built records. Beware: `load_model` writes a file's `Profile =` into `os.environ`, and `load` / `load_model` set the model scope, both process-global (see `tests/test_load_model.py`'s `model_scope` fixture). Fixtures (`ieee13.cimtbl`, `ieee14.cimtbl`, `wire_infos.cimtbl`) are in `tests/fixtures/`.
