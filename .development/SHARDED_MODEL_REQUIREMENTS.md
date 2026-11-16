@@ -104,8 +104,17 @@ a file named twice, and an assembly naming another assembly all raise `CimtblPar
 
 **Today.** No such notion.
 
-**Met when.** Any other class in a boundary file, and any `Update` row there, raises with file and line. Whether
-a boundary node may carry a container is open; see [Open questions](#open-questions).
+**Decided.** There is no artificial container. A boundary node names a real one in `ConnectivityNodeContainer`:
+the area that contains both frames, declared before the boundary is read.
+
+**Today.** The container of a node depends on load order. `connectivity.add_connectivity` gives a node without
+a container the container of the first equipment that touches it, so an undeclared boundary node, or one
+declared bare, ends up in whichever frame loads first. A node declared with a container keeps it. Declaring or
+updating a node after equipment has used it raises.
+
+**Met when.** Any other class in a boundary file, and any `Update` row there, raises with file and line. A
+boundary node without a `ConnectivityNodeContainer` raises. Boundaries are bound before every frame, whatever
+order the assembly lists them in, so a boundary node's container never depends on the order of frames.
 
 ### S4. Cross-model references go through boundaries
 
@@ -321,11 +330,15 @@ has all of them:
 `pyproject.toml` pins `cim-profiles<0.2`, so the pin must be raised to use them. The test suite passes against
 0.2.0a3 as it stands.
 
+## Shared files in feeder packages
+
+Published feeders do not use edge models. Each feeder package is self-contained and repeats what it shares with
+other packages in byte-identical shared files (CIMTBL-MODELS-INTERNAL `PACKAGE_SPEC.md`). Joining packages
+needs each shared file bound once, which a reader can decide from the checksums in the packages' manifests.
+S17 remains for the solver's own use.
+
 ## Open questions
 
-- **Boundary node containers.** May a boundary `ConnectivityNode` name a `ConnectivityNodeContainer`? The
-  Frameworks note recommends an artificial container declared in the boundary model itself, which S3 would then
-  have to allow. The alternative is that a boundary node has none.
 - **Unused boundary nodes** in a frame load: omitted or marked?
 - **Write-back for S12.** Regenerating a frame's text loses hand-written layout and comments in git-tracked
   models. The alternative is a row-level patch of the source files, which is a larger piece of work.
