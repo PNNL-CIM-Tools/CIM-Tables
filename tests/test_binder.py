@@ -2,7 +2,8 @@
 model (BaseVoltage, BaseFrequency, BasePower, EnergySource). network.cim is
 read once; plain scalar attrs + units land correctly (verified via .to());
 objects are keyed by mRID (cim-graph's index, populated at the add_to_graph
-call site), and an mRID reused by another object - in any class - raises.
+call site), and an mRID reused in another class raises; in the same class
+only a restatement of the same facts is accepted.
 
 ieee13.cimtbl is parsed and validated through the real parser and validator
 (no hand-built records) and bound into a real BusBranchModel.
@@ -18,6 +19,7 @@ os.environ['CIMG_CIM_PROFILE'] = 'cim18v17'
 import cimprofiles.cim18.cim18v17 as cim
 from cimgraph.models import BusBranchModel
 
+import cimtables
 from cimtables import graph_write
 from cimtables.binder import bind_row
 from cimtables import parser, validate
@@ -84,6 +86,95 @@ def test_mrid_reused_in_another_class_raises(network):
     _bind_target_rows(network)
     with pytest.raises(ValueError, match=r"mRID 'base_115' .* already used by BaseVoltage"):
         _bind_text(network, 'Object BaseFrequency: mRID=base_115, frequency=60\n')
+
+
+_RESTATED = {
+    'scalars and units': 'Object BaseVoltage: mRID=bv_1, name=12.47 kV, nominalVoltage (kV)=12.47\n',
+    'another unit': 'Object BaseVoltage: mRID=bv_1, nominalVoltage (V)=12470\n',
+    'blank cells say nothing': 'Table BaseVoltage: mRID, name, nominalVoltage (kV)\n    bv_1, ,\n',
+    'a reference': 'Object ACLineSegment: mRID=line_1, BaseVoltage=bv_1\n',
+    'a relative impedance': 'Object ACLineSegment: mRID=line_1, r (pu)=0.01\n',
+    'connectivity': 'Object ACLineSegment: mRID=line_1, node1=n1, node2=n2\n',
+    'an auto-vivified node': 'Object ConnectivityNode: mRID=n1, ConnectivityNodeContainer=test_feeder\n',
+}
+_FIRST_DEFINITIONS = (
+    'Object BasePower: mRID=sbase, basePower (MVA)=100\n'
+    'Object BaseVoltage: mRID=bv_1, name=12.47 kV, nominalVoltage (kV)=12.47\n'
+    'Object ACLineSegment: mRID=line_1, node1=n1, node2=n2, BaseVoltage=bv_1, r (pu)=0.01\n'
+)
+
+
+@pytest.mark.parametrize('restated', _RESTATED.values(), ids=_RESTATED)
+def test_restating_the_same_facts_is_a_no_op(network, restated):
+    # each feeder can declare the BaseVoltage it uses; a file imported from
+    # two branches binds twice. The repeat returns the bound object, unchanged.
+    _bind_text(network, _FIRST_DEFINITIONS)
+    count = sum(len(objects) for objects in network.graph.values())
+    [again] = _bind_text(network, restated)
+    assert again is network.find_by_mRID(again.mRID)
+    assert sum(len(objects) for objects in network.graph.values()) == count
+
+
+_CONFLICTS = {
+    'another class': ('Object Breaker: mRID=line_1\n', r"mRID 'line_1' of Breaker is already used by ACLineSegment"),
+    'another value': ('Object BaseVoltage: mRID=bv_1, nominalVoltage (kV)=13.2\n', r"BaseVoltage 'bv_1' is already defined with nominalVoltage"),
+    'an unset value': ('Object BaseVoltage: mRID=bv_1, description=new\n', r"with description unset, not 'new'"),
+    'another reference': ('Object ACLineSegment: mRID=line_1, BaseVoltage=bv_2\n', r"with BaseVoltage 'bv_1', not 'bv_2'"),
+    'another impedance': ('Object ACLineSegment: mRID=line_1, r (pu)=0.02\n', r"already defined with r "),
+    'another node': ('Object ACLineSegment: mRID=line_1, node2=n3\n', r"with node2 'n2', not 'n3'"),
+    'another container': ('Object ConnectivityNode: mRID=n1, ConnectivityNodeContainer=fdr_2\n', r"with ConnectivityNodeContainer 'test_feeder', not 'fdr_2'"),
+    'phases shorthand': ('Object ACLineSegment: mRID=line_1, phases=ABC\n', r"its phases shorthand can't be restated"),
+}
+
+
+@pytest.mark.parametrize(('restated', 'message'), _CONFLICTS.values(), ids=_CONFLICTS)
+def test_restating_different_facts_raises(network, restated, message):
+    # a repeat never changes the model, so load order can't; adding a value is Update's job
+    _bind_text(network, _FIRST_DEFINITIONS + 'Object BaseVoltage: mRID=bv_2\n')
+    with pytest.raises(ValueError, match=message):
+        _bind_text(network, restated)
+
+
+_PHASE_IMPEDANCE = (
+    'Object PerLengthPhaseImpedance: mRID=mtx601, conductorCount=1\n'
+    'Table PhaseImpedanceData: identifier, PhaseImpedance, row, column, r (ohm/mile)\n'
+    '    mtx601_1_1, mtx601, 1, 1, {r}\n'
+)
+
+
+def _load_two_catalogs(network, tmp_path, second):
+    (tmp_path / 'catalog_a.cimtbl').write_text(_PHASE_IMPEDANCE.format(r=0.3465))
+    (tmp_path / 'catalog_b.cimtbl').write_text(second)
+    (tmp_path / 'main.cimtbl').write_text('Import catalog_a.cimtbl\nImport catalog_b.cimtbl\n')
+    return cimtables.load(tmp_path / 'main.cimtbl', network)
+
+
+def test_restating_an_identity_only_row_by_identifier_is_a_no_op(network, tmp_path):
+    # PhaseImpedanceData has no mRID: its identifier keys the restatement
+    _load_two_catalogs(network, tmp_path, _PHASE_IMPEDANCE.format(r=0.3465))
+    [data] = network.graph[cim.PhaseImpedanceData].values()
+    assert data.identifier == cim.PhaseImpedanceData().uuid(mRID='mtx601_1_1')
+    assert graph_write.resolve(network, cim.PerLengthPhaseImpedance, 'mtx601').PhaseImpedanceData == [data]
+
+
+_IDENTITY_CONFLICTS = {
+    'another value': (_PHASE_IMPEDANCE.format(r=0.3466), r"PhaseImpedanceData 'mtx601_1_1' is already defined with r "),
+    'an unset value': (
+        'Table PhaseImpedanceData: identifier, x (ohm/mile)\n    mtx601_1_1, 1.0179\n',
+        r"PhaseImpedanceData 'mtx601_1_1' is already defined with x unset",
+    ),
+    'another reference': (
+        'Object PerLengthPhaseImpedance: mRID=mtx602, conductorCount=1\n'
+        'Table PhaseImpedanceData: identifier, PhaseImpedance\n    mtx601_1_1, mtx602\n',
+        r"PhaseImpedanceData 'mtx601_1_1' is already defined with PhaseImpedance 'mtx601', not 'mtx602'",
+    ),
+}
+
+
+@pytest.mark.parametrize(('second', 'message'), _IDENTITY_CONFLICTS.values(), ids=_IDENTITY_CONFLICTS)
+def test_restating_an_identity_only_row_differently_raises(network, tmp_path, second, message):
+    with pytest.raises(cimtables.CimtblBindError, match=r"catalog_b\.cimtbl:\d+: " + message):
+        _load_two_catalogs(network, tmp_path, second)
 
 
 def test_name_is_optional_data_not_the_key(network):

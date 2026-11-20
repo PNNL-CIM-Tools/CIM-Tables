@@ -12,7 +12,7 @@ prerelease-mode = "allow"
 
 [[package]]
 name = "cim-graph"
-version = "0.6.0"
+version = "0.6.1"
 source = { editable = "../CIM-Graph" }
 dependencies = [
     { name = "cim-profiles" },

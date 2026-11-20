@@ -40,13 +40,17 @@ to check against.
 """
 
 import dataclasses
+import logging
+import math
 
 from cimgraph.models import GraphModel
+from cimprofiles.units.units import CIMUnit
 from cimtables import connectivity, graph_write, synthetic, validate, wkt as wkt_parser
 from cimtables.units import Qty
 
 _SKIP_FIELDS = {*validate.KEY_FIELDS, 'source_file', 'source_line'}
 _CONTAINER_FIELD = 'EquipmentContainer'
+_log = logging.getLogger(__name__)
 
 
 class CimtblBindError(ValueError, TypeError):
@@ -80,6 +84,10 @@ def bind_row(network: GraphModel, row: object, *, obj: object = None, container:
     connectivity/phase columns (they would make a second set of Terminals).
     No EquipmentContainer is defaulted onto it.
 
+    A formative row whose mRID (or identifier) is already bound only
+    restates it (see _restate): the same facts again are a no-op returning
+    the bound object, anything else raises.
+
     `obj` lets a caller (ObjectBuilder.from_table) supply an already-created
     object instead of this function constructing one with cim_cls(mRID=...) -
     so a builder's own create() (which may do more than a bare constructor
@@ -110,6 +118,9 @@ def _bind_row(network: GraphModel, row: object, obj: object, container: object, 
         if obj is None:
             raise ValueError(f"Update {cim_cls.__name__} {row.mRID!r}: no such object (an Update adds to an object defined earlier)")
     elif obj is None:
+        existing = _bound_object(network, row, cim_cls)
+        if existing is not None:
+            return _restate(network, row, existing)
         obj = _new_object(cim_cls, row)
 
     node_cols: dict[str, str] = {}
@@ -195,6 +206,94 @@ def _bind_row(network: GraphModel, row: object, obj: object, container: object, 
     if not update:
         graph_write.add_to_graph(network, obj)
     return obj
+
+
+def _bound_object(network: GraphModel, row: object, cim_cls: type) -> object | None:
+    """The object a formative row's key is already bound to, or None: found by
+    mRID, or for an Identity-only row by the UUID its identifier seeds (in any
+    class, so a class mismatch is reported rather than missed)."""
+    if row.mRID is not None:
+        return network.find_by_mRID(row.mRID)
+    if row.identifier is None:
+        return None
+    identifier = _new_object(cim_cls, row).identifier
+    for objects in network.graph.values():
+        if identifier in objects:
+            return objects[identifier]
+    return None
+
+
+def _restate(network: GraphModel, row: object, existing: object) -> object:
+    """A formative row (Object/Table) whose key (mRID, or an Identity-only
+    row's identifier) is already bound: the same facts stated again - a
+    BaseVoltage every feeder file declares, a node the equipment that first
+    touched it created, a file imported from two branches - leave the model
+    as it is and return the bound object.
+
+    Every cell the row sets must equal what is bound (CIMUnits within 1e-9
+    relative, a list-valued reference must contain the target); blank cells
+    say nothing. A different class, a different value, or a value the object
+    doesn't have yet raises: a repeat never changes the model, so load order
+    can't, and adding a value is Update's job. The phases and wkt shorthand
+    can't be restated."""
+    cim = network.cim
+    cim_cls = getattr(cim, type(row).__name__.removesuffix('Row'))
+    key_name, key = ('mRID', row.mRID) if row.mRID is not None else ('identifier', row.identifier)
+    if type(existing) is not cim_cls:
+        raise ValueError(
+            f"{key_name} {key!r} of {cim_cls.__name__} is already used by {type(existing).__name__} "
+            f"(an {key_name} must be unique within the model)"
+        )
+    ref_slots = validate.reference_slots(type(row).__name__)
+    system_base = network.base_power if network.graph.get(getattr(cim, 'BasePower', None)) else None
+    row_values = _new_object(cim_cls, row)  # never added to the graph: the row's plain cells, converted by set_attr
+
+    for f in dataclasses.fields(row):
+        value = getattr(row, f.name)
+        if f.name in _SKIP_FIELDS or value is None:
+            continue
+        is_shorthand = f.name not in existing.__dataclass_fields__
+        if is_shorthand and f.name in synthetic.CONNECTIVITY_COLUMNS:
+            node_field, sequence_number = synthetic.CONNECTIVITY_COLUMNS[f.name]
+            if isinstance(existing, cim.TransformerEnd):
+                terminal = existing.Terminal
+            else:
+                terminal = next((t for t in existing.Terminals if t.sequenceNumber == sequence_number), None)
+            node = getattr(terminal, node_field) if terminal is not None else None
+            bound = None if node is None else node.mRID
+            same = bound == value
+        elif is_shorthand:
+            raise ValueError(
+                f"{cim_cls.__name__} {key!r} is already defined, and its {f.name} shorthand "
+                f"can't be restated: write it only where the object is defined"
+            )
+        elif f.name in ref_slots:
+            target = getattr(existing, f.name)
+            if isinstance(target, list):
+                bound = [t.mRID for t in target]
+                same = value in bound
+            else:
+                bound = None if target is None else target.mRID
+                same = bound == value
+        elif isinstance(value, Qty) and value.is_relative():
+            bound = graph_write.get_qty(existing, f.name, value.unit, base=value.base, system_base=system_base)
+            same = bound is not None and math.isclose(bound, value.value, rel_tol=1e-9)
+        else:
+            graph_write.set_attr(row_values, cim, f.name, value)
+            want, bound = getattr(row_values, f.name), getattr(existing, f.name)
+            if isinstance(want, CIMUnit) and isinstance(bound, CIMUnit):
+                same = math.isclose(float(want), float(bound), rel_tol=1e-9)
+            else:
+                same = want == bound
+        if not same:
+            raise ValueError(
+                f"{cim_cls.__name__} {key!r} is already defined with {f.name} "
+                f"{'unset' if bound is None else repr(bound)}, not {value!r} "
+                f"(a repeated definition must match it; an Update adds a value)"
+            )
+
+    _log.debug('%s:%s: %s %r restated', row.source_file, row.source_line, cim_cls.__name__, key)
+    return existing
 
 
 def _bind_wkt(network: GraphModel, obj: object, mrid: str, wkt_text: str) -> None:

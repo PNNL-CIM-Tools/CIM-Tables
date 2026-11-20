@@ -138,9 +138,21 @@ seeded from the mRID and the model scope; renaming it (`name`) keeps the UUID. m
 model, not per class**, and reusing one in any class raises. Translators prefix them to keep them distinct (bus
 `671` vs load `ld_671`). That convention is the translator's, not enforced beyond uniqueness.
 
+An `Object`/`Table` row whose mRID is already bound in the same class **restates** it: the same facts again
+leave the model unchanged. Each feeder file can declare the `BaseVoltage`s it uses, a boundary file can declare a
+node the equipment that first touched it already created, and a file imported from two branches binds twice.
+Every cell the row sets must equal what is bound (CIMUnits within 1e-9 relative, in any unit; pu/percent read
+back on the same base; a list-valued reference must contain the target; node/bus columns must name the nodes of
+the bound Terminals). Blank cells say nothing. A different class, a different value, or a value the object
+doesn't have yet raises, so a repeat never changes the model and load order can't either. Adding a value is
+`Update`'s job. The `phases` and `wkt` shorthand can't be restated, so write them only where the object is
+defined.
+
 A CIM 18 Identity-only class has no `mRID` (e.g. `PhaseImpedanceData`). It takes an optional `identifier`
 column instead, which seeds the UUID the same way. Without one the UUID is random. Identity-only objects aren't
-indexed, because nothing references them.
+indexed, because nothing references them. A row whose `identifier` seeds a UUID already in the model restates
+that object under the same rules as an mRID, so a line configuration's `PhaseImpedanceData` can travel with its
+`PerLengthPhaseImpedance` into every file that declares it. A row without an `identifier` is always new.
 
 `name` is optional, non-unique data like any other attribute.
 
@@ -276,7 +288,8 @@ The parser reads the settings but applies none of them; `load` / `load_model` do
 
 - **Within an Import chain**, a setting is declared at most once per file. An imported file's setting fills one
   the importer left unset. One that disagrees with an already-set value raises at the Import line, as does an
-  Import cycle. A file imported from two branches is not a cycle (but its duplicate mRIDs raise at bind).
+  Import cycle. A file imported from two branches is not a cycle; its rows bind twice, and the second time
+  they restate (see [Row key and identity](#row-key-and-identity)), so that file can't use the `phases` or `wkt` shorthand.
 - **`Profile =`** names the CIM profile the rows are written against. `load_model` writes it to
   `CIMG_CIM_PROFILE` before building its model. `load` / `load_text` require it to be the network's own profile.
   With no `Profile =`, the environment's `CIMG_CIM_PROFILE` is used; with neither, validation fails. Only short
@@ -317,7 +330,8 @@ unit.
 ## Binding
 
 `bind_row(network, row, *, obj=None, container=None)` builds the object from the row key (unless a builder passes
-`obj`), then sorts every set field into exactly one bucket, purely from the profile:
+`obj`; an mRID or identifier that is already bound is checked as a restatement instead, see
+[Row key and identity](#row-key-and-identity)), then sorts every set field into exactly one bucket, purely from the profile:
 
 | Field | Goes to |
 |---|---|
