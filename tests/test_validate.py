@@ -128,3 +128,18 @@ def test_real_attribute_shadows_synthetic_column_of_same_name():
     # phase-children shorthand string
     row = validate.validate(_record('Terminal', {'mRID': 't1', 'phases': 'AB'}))
     assert row.phases.value == 'AB'
+
+
+def test_columns_reflects_kinds_for_a_class(monkeypatch):
+    monkeypatch.setenv('CIMG_CIM_PROFILE', 'cim18v17')
+    columns = validate.columns('OverheadWireInfo')
+    assert columns['radius'][0] == 'quantity' and columns['radius'][1].__name__ == 'Length'
+    assert columns['ProductAssetModel'] == ('reference', columns['ProductAssetModel'][1])
+    assert columns['strandCount'][0] == 'scalar'
+    assert 'mRID' not in columns
+
+
+def test_columns_unknown_class_raises(monkeypatch):
+    monkeypatch.setenv('CIMG_CIM_PROFILE', 'cim18v17')
+    with pytest.raises(validate.CimtblValidationError, match="'NoSuchInfo' is not a class"):
+        validate.columns('NoSuchInfo')

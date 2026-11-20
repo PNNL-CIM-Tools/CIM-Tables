@@ -100,7 +100,8 @@ Larger examples, including the IEEE 13-bus feeder and transmission test cases, a
   the model's `BasePower` object, not a hidden default.
 - **Define, then add.** `Object` and `Table` define objects; `Update` adds properties to an object defined
   earlier, possibly in another file. That is CIM's formative and additive split, and how RDF adds properties to
-  an existing `rdf:about`.
+  an existing `rdf:about`. Defining an object again with the same values (a `BaseVoltage` each feeder file
+  declares) changes nothing; defining it with different values raises.
 - **The shorthand expands into normative CIM.** The only columns that aren't CIM names are the connectivity and
   phase conveniences: `node`/`node1`/`node2` (ConnectivityNode), `bus`/`bus1`/`bus2` (TopologicalNode) and
   `phases`. They generate standard Terminals, nodes and per-phase objects following the CIM rules (delta loads

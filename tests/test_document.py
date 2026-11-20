@@ -53,8 +53,9 @@ def test_random_tables_round_trip():
         for i in range(rng.randint(1, 5)):
             cells = [f'r{i}'] + [rng.choice([None, ''.join(rng.choices(alphabet, k=rng.randint(0, 6)))])
                                  for _ in range(rng.randint(required, len(columns)) - 1)]
-            rows.append(Row(cells, comment=rng.choice([None, 'between\nrows'])))
-        table = Table('IdentifiedObject', columns, rows, comment=rng.choice([None, 'above']))
+            rows.append(Row(cells, comment=rng.choice([None, 'between\nrows', 'a # b'])))
+        table = Table('IdentifiedObject', columns, rows, comment=rng.choice([None, 'above']),
+                      footnotes=rng.choice([False, True]))
         records, _ = parser.parse_text(format_document(Document('t', [table])))
         assert [(r.fields, r.units) for r in records] == _expected_records(table)
 
@@ -89,6 +90,29 @@ def test_layout_is_padded_and_deterministic():
         'Import wires.cimtbl\n'
     )
     assert format_document(document) == text
+
+
+def test_footnotes_list_each_comment_once_and_mark_the_rows():
+    table = Table('BaseVoltage', [Column('mRID'), Column('name')], [
+        Row(['bv_1', 'one'], comment='assumed'),
+        Row(['bv_22', None], comment='two\nlines'),
+        Row(['bv_3', 'three']),
+        Row(['bv_4', 'four'], comment='assumed'),
+    ], comment='voltages', footnotes=True)
+    text = format_document(Document('t', [table]))
+    assert text == (
+        '# voltages\n'
+        '# note 1: assumed\n'
+        '# note 2: two\n'
+        '#   lines\n'
+        'Table BaseVoltage: mRID, name\n'
+        '    bv_1,  one    # note 1\n'
+        '    bv_22,        # note 2\n'
+        '    bv_3,  three\n'
+        '    bv_4,  four   # note 1\n'
+    )
+    records, _ = parser.parse_text(text)
+    assert [(r.fields, r.units) for r in records] == _expected_records(table)
 
 
 def test_object_statement_round_trips():
@@ -210,3 +234,60 @@ def test_write_documents_rejects_a_cimtbl_suffix(tmp_path):
     master.statements[0] = Import('voltages.cimtbl')
     with pytest.raises(ValueError, match="imports 'voltages.cimtbl'.*stems"):
         write_documents(DocumentSet(master, [part]), tmp_path)
+
+
+def _wire_table(**overrides) -> Table:
+    return Table('OverheadWireInfo', [Column('mRID'), Column('name'), Column('radius', 'in')], [
+        Row(['w_turkey', 'Turkey', '0.099'], commented=['24', '1,190']),
+        Row(['w_swanate', 'Swanate', '0.1285'], commented=['39', None]),
+        Row(['w_x', 'X', '0.2']),
+    ], commented_columns=[Column('aluminumMassPerLength', 'lb/kft'), Column('ratedStrengthNote')], **overrides)
+
+
+def test_commented_columns_follow_the_header_and_each_row():
+    text = format_document(Document('wires', [_wire_table()], profile='cim18v17'))
+    assert text.endswith(
+        'Table OverheadWireInfo: mRID, name, radius (in)  # aluminumMassPerLength (lb/kft), ratedStrengthNote\n'
+        '    w_turkey,  Turkey,  0.099   # 24, "1,190"\n'
+        '    w_swanate, Swanate, 0.1285  # 39,\n'
+        '    w_x,       X,       0.2     # ,\n'
+    )
+    records, _ = parser.parse_text(text)
+    assert [r.fields for r in records] == [
+        {'mRID': 'w_turkey', 'name': 'Turkey', 'radius': '0.099'},
+        {'mRID': 'w_swanate', 'name': 'Swanate', 'radius': '0.1285'},
+        {'mRID': 'w_x', 'name': 'X', 'radius': '0.2'},
+    ]
+
+
+def test_uncommenting_makes_them_real_columns():
+    text = format_document(Document('wires', [_wire_table()], profile='cim18v17'))
+    records, _ = parser.parse_text(text.replace('  # ', ', '))
+    assert records[0].fields['aluminumMassPerLength'] == '24'
+    assert records[0].units['aluminumMassPerLength'] == 'lb/kft'
+    assert records[0].fields['ratedStrengthNote'] == '1,190'
+    assert records[2].fields['aluminumMassPerLength'] is None
+
+
+def test_a_catalog_with_commented_columns_loads():
+    network = BusBranchModel(connection=None, container=None, distributed=False)
+    cimtables.load_text(format_document(Document('wires', [_wire_table()], profile='cim18v17')), network)
+    assert network.graph[cim.OverheadWireInfo]
+
+
+@pytest.mark.parametrize('overrides, message', [
+    ({'footnotes': True}, 'without footnotes or defaulted columns'),
+])
+def test_commented_columns_reject_footnotes(overrides, message):
+    with pytest.raises(ValueError, match=message):
+        format_document(Document('wires', [_wire_table(**overrides)]))
+
+
+def test_commented_cells_must_match_the_commented_columns():
+    table = _wire_table()
+    table.rows[0] = Row(['w_turkey', 'Turkey', '0.099'], commented=['24'])
+    with pytest.raises(ValueError, match='row 1 has 1 commented cells, expected 2'):
+        format_document(Document('wires', [table]))
+    table.commented_columns = []
+    with pytest.raises(ValueError, match='commented cells but no commented_columns'):
+        format_document(Document('wires', [table]))

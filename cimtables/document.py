@@ -10,6 +10,20 @@ newline. Table rows are indented 4 spaces; each cell but the last is padded
 after its comma to the column's widest cell, so columns line up. Every row
 writes every cell (a trailing None is a trailing empty cell).
 
+Row comments go on their own `#` lines above the row; a Table with
+`footnotes=True` instead lists each distinct row comment once, as `# note N:`
+lines above its header (numbered in order of first use), and ends each
+commented row with `# note N`. The parser ignores both forms.
+
+Commented columns: a Table's `commented_columns` are written after its
+header as `  # name (unit), ...`, and each row's `commented` cells after its
+last cell as `  # cell, ...`, aligned like the other cells. They are columns
+the profile does not have yet (proposed attributes): the parser ignores them,
+and once the profile gains them, replacing each `  # ` with `, ` makes them
+real columns. Every row writes every commented cell, so that edit keeps rows
+and header the same width; a table with defaulted columns or footnotes
+cannot have them.
+
 Quoting: a cell is quoted iff it contains `,` `(` `)` `#` `"`, starts or ends
 with whitespace, is the empty string, or starts like a statement (`Table X:`, `Update X:`,
 `Profile =`, `Import `), which the parser would otherwise read as one. Inner
@@ -17,7 +31,7 @@ with whitespace, is the empty string, or starts like a statement (`Table X:`, `U
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NamedTuple
 
@@ -36,9 +50,11 @@ class Column(NamedTuple):
 
 class Row(NamedTuple):
     """One cell per column without a default, in header order, optionally
-    followed by cells overriding the defaulted columns, in header order."""
+    followed by cells overriding the defaulted columns, in header order.
+    commented: one cell per Table.commented_columns (None: all blank)."""
     cells: list[str | None]
     comment: str | None = None
+    commented: list[str | None] | None = None
 
 
 class Import(NamedTuple):
@@ -53,6 +69,8 @@ class Table:
     rows: list[Row]
     comment: str | None = None
     update: bool = False  # an additive `Update Table <Class>:` statement
+    footnotes: bool = False  # row comments as numbered notes above the header, `# note N` on the row
+    commented_columns: list[Column] = field(default_factory=list)  # proposed attributes, written as `# ...`
 
 
 @dataclass
@@ -92,11 +110,47 @@ def _cell(text: str | None) -> str:
     return text
 
 
-def _comment(text: str | None, indent: str = '') -> list[str]:
-    """`# ` lines for a (possibly multi-line) comment; none for None."""
+def _comment(text: str | None, indent: str = '', prefix: str = '') -> list[str]:
+    """`# ` lines for a (possibly multi-line) comment, the first starting with prefix; none for None."""
     if text is None:
         return []
-    return [f'{indent}# {line}'.rstrip() for line in text.split('\n')]
+    return [f'{indent}# {prefix if number == 0 else ""}{line}'.rstrip()
+            for number, line in enumerate(text.split('\n'))]
+
+
+def _footnotes(table: Table) -> dict[str, int]:
+    """Each distinct row comment -> its note number, in order of first use."""
+    notes: dict[str, int] = {}
+    for row in table.rows:
+        if row.comment is not None and row.comment not in notes:
+            notes[row.comment] = len(notes) + 1
+    return notes
+
+
+def _header_cell(column: Column) -> str:
+    return column.name + (f' ({column.unit})' if column.unit else '')
+
+
+def _commented_cells(document_name: str, table: Table) -> list[str] | None:
+    """Each row's commented cells as one aligned text (in row order), or None
+    for a table without commented columns."""
+    if not table.commented_columns:
+        if any(row.commented for row in table.rows):
+            raise ValueError(f'{document_name}: Table {table.cim_class} has commented cells but no commented_columns')
+        return None
+    where = f'{document_name}: Table {table.cim_class}'
+    if table.footnotes or any(column.default is not None for column in table.columns):
+        raise ValueError(f'{where}: commented columns need a table without footnotes or defaulted columns')
+    width = len(table.commented_columns)
+    grid = []
+    for row_number, row in enumerate(table.rows, start=1):
+        cells = row.commented if row.commented is not None else [None] * width
+        if len(cells) != width:
+            raise ValueError(f'{where} row {row_number} has {len(cells)} commented cells, expected {width}')
+        grid.append([_cell(text) for text in cells])
+    widths = [max(len(cells[position]) for cells in grid) for position in range(width)]
+    return [''.join((text + ',').ljust(widths[position] + 2) for position, text in enumerate(cells[:-1])) + cells[-1]
+            for cells in grid]
 
 
 def format_document(document: Document) -> str:
@@ -125,9 +179,12 @@ def format_document(document: Document) -> str:
 
         header = []
         for column in statement.columns:
-            text = column.name + (f' ({column.unit})' if column.unit else '')
-            header.append(text if column.default is None else f'{text}={_cell(column.default)}')
-        lines.append(f"{'Update Table' if statement.update else 'Table'} {statement.cim_class}: {', '.join(header)}")
+            header.append(_header_cell(column) if column.default is None else f'{_header_cell(column)}={_cell(column.default)}')
+        header_line = f"{'Update Table' if statement.update else 'Table'} {statement.cim_class}: {', '.join(header)}"
+        commented = _commented_cells(document.name, statement)
+        if statement.commented_columns:
+            header_line += '  # ' + ', '.join(_header_cell(column) for column in statement.commented_columns)
+        lines.append(header_line)
 
         required = sum(column.default is None for column in statement.columns)
         rows = [[_cell(text) for text in row.cells] for row in statement.rows]
@@ -142,10 +199,23 @@ def format_document(document: Document) -> str:
                 raise ValueError(f'{document.name}: Table {statement.cim_class} row {row_number} is all blank')
             for position, text in enumerate(cells):
                 widths[position] = max(widths.get(position, 0), len(text))
+        notes = _footnotes(statement) if statement.footnotes else {}
+        if notes:
+            header_line = lines.pop()
+            for text, number in notes.items():
+                lines.extend(_comment(text.replace('\n', '\n  '), prefix=f'note {number}: '))
+            lines.append(header_line)
         for row, cells in zip(statement.rows, rows):
-            lines.extend(_comment(row.comment, _ROW_INDENT))
+            if not notes:
+                lines.extend(_comment(row.comment, _ROW_INDENT))
             padded = [(text + ',').ljust(widths[position] + 2) for position, text in enumerate(cells[:-1])]
-            lines.append((_ROW_INDENT + ''.join(padded) + cells[-1]).rstrip())
+            line = _ROW_INDENT + ''.join(padded) + cells[-1]
+            if commented is not None:
+                line = f'{_ROW_INDENT}{"".join(padded)}{cells[-1].ljust(widths[len(cells) - 1])}  # {commented.pop(0)}'
+            if notes and row.comment is not None:
+                last = len(cells) - 1
+                line = f'{_ROW_INDENT}{"".join(padded)}{cells[-1].ljust(widths[last])}  # note {notes[row.comment]}'
+            lines.append(line.rstrip())
         blocks.append(lines)
 
     return '\n\n'.join('\n'.join(block) for block in blocks) + '\n'

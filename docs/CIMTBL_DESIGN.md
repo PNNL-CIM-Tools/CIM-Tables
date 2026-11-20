@@ -138,9 +138,21 @@ seeded from the mRID and the model scope; renaming it (`name`) keeps the UUID. m
 model, not per class**, and reusing one in any class raises. Translators prefix them to keep them distinct (bus
 `671` vs load `ld_671`). That convention is the translator's, not enforced beyond uniqueness.
 
+An `Object`/`Table` row whose mRID is already bound in the same class **restates** it: the same facts again
+leave the model unchanged. Each feeder file can declare the `BaseVoltage`s it uses, a boundary file can declare a
+node the equipment that first touched it already created, and a file imported from two branches binds twice.
+Every cell the row sets must equal what is bound (CIMUnits within 1e-9 relative, in any unit; pu/percent read
+back on the same base; a list-valued reference must contain the target; node/bus columns must name the nodes of
+the bound Terminals). Blank cells say nothing. A different class, a different value, or a value the object
+doesn't have yet raises, so a repeat never changes the model and load order can't either. Adding a value is
+`Update`'s job. The `phases` and `wkt` shorthand can't be restated, so write them only where the object is
+defined.
+
 A CIM 18 Identity-only class has no `mRID` (e.g. `PhaseImpedanceData`). It takes an optional `identifier`
 column instead, which seeds the UUID the same way. Without one the UUID is random. Identity-only objects aren't
-indexed, because nothing references them.
+indexed, because nothing references them. A row whose `identifier` seeds a UUID already in the model restates
+that object under the same rules as an mRID, so a line configuration's `PhaseImpedanceData` can travel with its
+`PerLengthPhaseImpedance` into every file that declares it. A row without an `identifier` is always new.
 
 `name` is optional, non-unique data like any other attribute.
 
@@ -209,6 +221,14 @@ the missing ones in after loading. `phases=ABC` means three separate phases, a p
 - One `<Class>Phase` child is made per token, carrying the normative `SinglePhaseKind` and a `sequenceNumber`
   where the class has one. The child class is found by walking the MRO (`LinearShuntCompensator` →
   `LinearShuntCompensatorPhase`, `Breaker` → `SwitchPhase`). Children are named `<mRID>_<phase>`.
+- **`sequenceNumbers`** beside `phases` (or `phaseSide1`/`phaseSide2`) gives the children's `sequenceNumber`
+  instead of 1..n: space-separated, one per child in child order, e.g. `phases=ABCN, sequenceNumbers=8 9 10 4`.
+  It is for a line on a shared `WireSpacing`, whose positions are numbered once for the spacing (the second
+  circuit of a double-circuit span on 8/9/10 with the shared neutral on 4, a triplex secondary `s1s2N` on
+  5/6/7); CIMHub-gis places each conductor by its `ACLineSegmentPhase.sequenceNumber`. A blank cell is 1..n.
+  A count that differs from the children, a repeated number, a number below 1, the column without `phases`, or
+  a child class with no `sequenceNumber` (cim18v17: only `ACLineSegmentPhase` / `WireSegmentPhase` have one)
+  raises.
 - **Delta shunts** (`phaseConnection=D`) get one child per line-to-line branch, `N` ignored. The child's
   `phase` is the from-phase (normative CIM: "connected from the indicated phase to the next logical non-neutral
   phase", A→B→C→A, s1→s2). Where the class has the `phases` extension (cim18v17 `EnergyConsumerPhase`), it also
@@ -268,7 +288,8 @@ The parser reads the settings but applies none of them; `load` / `load_model` do
 
 - **Within an Import chain**, a setting is declared at most once per file. An imported file's setting fills one
   the importer left unset. One that disagrees with an already-set value raises at the Import line, as does an
-  Import cycle. A file imported from two branches is not a cycle (but its duplicate mRIDs raise at bind).
+  Import cycle. A file imported from two branches is not a cycle; its rows bind twice, and the second time
+  they restate (see [Row key and identity](#row-key-and-identity)), so that file can't use the `phases` or `wkt` shorthand.
 - **`Profile =`** names the CIM profile the rows are written against. `load_model` writes it to
   `CIMG_CIM_PROFILE` before building its model. `load` / `load_text` require it to be the network's own profile.
   With no `Profile =`, the environment's `CIMG_CIM_PROFILE` is used; with neither, validation fails. Only short
@@ -309,12 +330,13 @@ unit.
 ## Binding
 
 `bind_row(network, row, *, obj=None, container=None)` builds the object from the row key (unless a builder passes
-`obj`), then sorts every set field into exactly one bucket, purely from the profile:
+`obj`; an mRID or identifier that is already bound is checked as a restatement instead, see
+[Row key and identity](#row-key-and-identity)), then sorts every set field into exactly one bucket, purely from the profile:
 
 | Field | Goes to |
 |---|---|
 | a connectivity column | `connectivity.add_connectivity` |
-| `phases` / `phaseSide1` / `phaseSide2` | `connectivity.add_phase_children` |
+| `phases` / `phaseSide1` / `phaseSide2` / `sequenceNumbers` | `connectivity.add_phase_children` |
 | `EquipmentContainer` | resolved, then used as the container |
 | any other reference | resolved, then `set_assc` (an unresolved mRID raises) |
 | a relative `Qty` | `set_attr`, deferred to the end |
@@ -390,7 +412,16 @@ quoted empty, optional comments on documents, tables and rows). Turning typed va
 - table rows are indented 4 spaces, and each cell but the last is padded after its comma to the column's widest
   cell;
 - a cell is quoted if it holds any of `,()#"`, has leading or trailing whitespace, is `''`, or starts like a
-  statement; a newline raises.
+  statement; a newline raises;
+- a row comment goes on its own `#` lines above the row. A `Table(..., footnotes=True)` instead lists each
+  distinct row comment once, as `# note N:` lines above its header (numbered in order of first use), and ends
+  each commented row with `# note N`. This is for large generated tables whose rows share a few notes. It is off
+  by default, so existing goldens don't change.
+- a `Table(..., commented_columns=[...])` writes columns the profile does not have yet (proposed attributes,
+  e.g. a datasheet column missing from the UML) after its header as `  # name (unit), ...`, and each row's
+  `Row(..., commented=[...])` cells after its last cell as `  # cell, ...`, aligned like the rest. The parser ignores
+  them. Once the profile gains the attributes, replacing each `  # ` with `, ` makes them real columns, so every row
+  writes every commented cell. A table with defaulted columns or footnotes cannot have them.
 
 `write_documents(DocumentSet(master, parts), dir)` writes `<name>.cimtbl` for each document (UTF-8, `\n`) and
 returns the master's path. It writes nothing if a name repeats, an Import is unknown, a part is never imported, or
@@ -409,7 +440,7 @@ shapes, units or split, so the writer chooses them.
   blank cell is unset.
 - **Terminals, folded (the default).** An equipment's Terminals become its `node`/`node1`/`node2` and
   `bus`/`bus1`/`bus2` columns, and its `<Class>Phase` children its `phases` (or `phaseSide1`/`phaseSide2`)
-  column, wherever binding that row makes exactly them: the writer reads a candidate cell off the children and
+  column, plus `sequenceNumbers` (phases in canonical order) where the children aren't numbered 1..n, wherever binding that row makes exactly them: the writer reads a candidate cell off the children and
   compares them with `connectivity.phase_plan`, the same plan `add_phase_children` builds from. A
   `TransformerEnd` takes its own Terminal as `node` (and `phases`). Folded objects get binding's generated mRIDs
   (`<mRID>_T<n>`, `<mRID>_<phase>`), so their mRIDs and UUIDs change, and references to them follow; their other
