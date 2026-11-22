@@ -1,0 +1,20 @@
+Profile = cim18v17
+Authority = https://example.com/models
+Model = tiny_feeder
+
+Object BasePower: mRID=sbase, basePower (MVA)=100
+Object Substation: mRID=sub
+Object Feeder: mRID=fdr, NormalEnergizingSubstation=sub
+
+Table BaseVoltage: mRID, nominalVoltage (kV)
+    bv_12kv, 12.47
+
+Object EnergySource: mRID=source, node=sourcebus, phases=ABC, nominalVoltage (kV)=12.47, BaseVoltage=bv_12kv, EquipmentContainer=fdr
+
+Table ACLineSegment: mRID, node1, node2, phases, length (ft), r (ohm), x (ohm), BaseVoltage, EquipmentContainer=fdr
+    ln_trunk,  sourcebus, n1, ABC, 2000, 0.38, 0.75, bv_12kv
+    ln_branch, n1,        n2, C,   500,  0.12, 0.20, bv_12kv
+
+Table EnergyConsumer: mRID, node, phases, p (kW), q (kVAr), BaseVoltage, EquipmentContainer=fdr
+    ld_n1, n1, ABC, 1155, 660, bv_12kv
+    ld_n2, n2, C,   170,  80,  bv_12kv

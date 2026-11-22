@@ -161,7 +161,8 @@ pip install --pre cim-tables
 
 - **`cimtables.load_model(path)`** builds a new model from a file: a `FeederModel` if the file has one
   `Feeder`, else a `NodeBreakerModel` (for a single `Substation`, or no container at all).
-  `load_model(path, model_cls=BusBranchModel)` builds a bus-branch model instead.
+  Pass `model_cls=FeederModel`, `NodeBreakerModel` or `BusBranchModel` to say which you expect instead
+  (`FeederModel` raises unless the file has exactly one `Feeder`).
 - **`cimtables.load(path, network)`** adds a file's objects to a cim-graph model you already have, and
   `load_text(text, network)` does the same for a string.
 - **`cimtables.to_documents(model, name)`** turns any cim-graph model (one read from CIM XML, say) into

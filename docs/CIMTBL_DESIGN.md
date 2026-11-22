@@ -186,7 +186,8 @@ prefix rule would capture real attributes such as `TopologicalNode.busName`.
 
 - The sequence number comes from the column name, not header order.
 - `node1` and `bus1` together put one Terminal on both a ConnectivityNode and a TopologicalNode, as PSS/E RAW's
-  node-breaker substation data does.
+  node-breaker substation data does. These are two objects, and mRIDs are unique within the model, so the two cells
+  need different values: a source with one ID per node has to make up the second key (e.g. `tn_<ID>`).
 - A node or bus that was never declared is created on first use, with the cell value as its mRID.
 - Terminals are named `<mRID>_T<n>`.
 - A `TransformerEnd` row's `node`/`bus` puts its Terminal on the end's transformer, with
@@ -387,8 +388,11 @@ decided what a row may carry.
   - else its one `Substation` → a `NodeBreakerModel` with it as container;
   - else a `NodeBreakerModel` with no container (e.g. a lone padmount).
 
-  `model_cls=BusBranchModel` builds a `BusBranchModel` instead, its container the file's one
-  `GeographicalRegion`, else None.
+  An explicit `model_cls` asserts the shape rather than inferring it from how many containers the file has:
+  - `FeederModel`: the file's one `Feeder` as container; none, or several, raises;
+  - `NodeBreakerModel`: one whatever `Feeder`s the file has (a tiered TSO-DSO model holds several), its
+    container the file's one `Substation`, else None;
+  - `BusBranchModel` (PSS/E RAW, MATPOWER): its container the file's one `GeographicalRegion`, else None.
 - **`bind_row`**: for builders that produce rows themselves (`ObjectBuilder.from_table`).
 
 ### Errors

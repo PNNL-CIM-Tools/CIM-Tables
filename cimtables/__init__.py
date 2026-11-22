@@ -67,16 +67,23 @@ def load_model(path, model_cls: type[GraphModel] | None = None) -> GraphModel:
     then the file's one Feeder (a FeederModel), else its one Substation (a
     NodeBreakerModel), else None (a NodeBreakerModel, e.g. a lone padmount).
 
-    model_cls=BusBranchModel (PSS/E RAW, MATPOWER) builds that instead, its
-    container the file's one GeographicalRegion, else None."""
-    if model_cls not in (None, BusBranchModel):
-        raise ValueError(f"model_cls must be None (chosen from the file) or BusBranchModel, not {model_cls.__name__}")
+    An explicit model_cls asserts the shape instead of inferring it:
+    FeederModel needs the file's one Feeder (none, or several, raises);
+    NodeBreakerModel is one whatever Feeders the file has, its container the
+    one Substation, else None. BusBranchModel (PSS/E RAW, MATPOWER) has the
+    file's one GeographicalRegion as its container, else None."""
+    if model_cls not in (None, FeederModel, NodeBreakerModel, BusBranchModel):
+        raise ValueError(
+            f"model_cls must be None (chosen from the file), FeederModel, NodeBreakerModel or BusBranchModel, "
+            f"not {model_cls.__name__}"
+        )
     records, header = parse_file(path)
     if header.profile is not None:
         os.environ['CIMG_CIM_PROFILE'] = header.profile
     get_cim_profile.cache_clear()
     _set_model_scope(header)
-    network = (model_cls or NodeBreakerModel)(container=None, connection=None, distributed=False)
+    network = (BusBranchModel if model_cls is BusBranchModel else NodeBreakerModel)(
+        container=None, connection=None, distributed=False)
     for record in records:
         bind_row(network, validate.validate(record), update=record.form == 'Update')
     if model_cls is BusBranchModel:
@@ -86,7 +93,9 @@ def load_model(path, model_cls: type[GraphModel] | None = None) -> GraphModel:
 
     feeders = list(network.graph.get(network.cim.Feeder, {}).values())
     substations = list(network.graph.get(network.cim.Substation, {}).values())
-    if len(feeders) == 1:
+    if model_cls is FeederModel and len(feeders) != 1:
+        raise ValueError(f"{path}: model_cls=FeederModel needs the file's one Feeder, but it has {len(feeders)}")
+    if len(feeders) == 1 and model_cls is not NodeBreakerModel:
         return FeederModel(container=feeders[0], connection=None, distributed=False, graph=network.graph)
     if len(substations) == 1:
         network.container = substations[0]
