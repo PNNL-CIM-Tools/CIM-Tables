@@ -9,7 +9,7 @@ os.environ['CIMG_CIM_PROFILE'] = 'cim18v17'
 import pytest
 from cimgraph.core import get_cim_profile, get_model_authority, get_model_name, set_model_scope
 from cimgraph.databases import XMLFile
-from cimgraph.models import BusBranchModel, FeederModel, NodeBreakerModel
+from cimgraph.models import BusBranchModel, FeederModel, GraphModel, NodeBreakerModel
 from cimgraph.utils import write_xml
 
 import cimtables
@@ -171,5 +171,36 @@ def test_bus_branch_model_takes_the_one_geographical_region(tmp_path):
 
 
 def test_other_model_classes_are_rejected(tmp_path):
-    with pytest.raises(ValueError, match='or BusBranchModel, not FeederModel'):
-        cimtables.load_model(_write(tmp_path, 'Object Feeder: mRID=fdr\n'), model_cls=FeederModel)
+    with pytest.raises(ValueError, match='or BusBranchModel, not GraphModel'):
+        cimtables.load_model(_write(tmp_path, 'Object Feeder: mRID=fdr\n'), model_cls=GraphModel)
+
+
+def test_explicit_feeder_model_takes_the_one_feeder(tmp_path):
+    network = cimtables.load_model(_write(tmp_path, 'Object Feeder: mRID=fdr\n'), model_cls=FeederModel)
+    assert isinstance(network, FeederModel)
+    assert network.container is network.find_by_mRID('fdr')
+
+
+@pytest.mark.parametrize('text, count', [
+    ('Object Substation: mRID=sub_a\n', 0),
+    ('Table Feeder: mRID\n    fdr_a\n    fdr_b\n', 2),
+])
+def test_explicit_feeder_model_without_one_feeder_raises(tmp_path, text, count):
+    with pytest.raises(ValueError, match=f"needs the file's one Feeder, but it has {count}"):
+        cimtables.load_model(_write(tmp_path, text), model_cls=FeederModel)
+
+
+def test_explicit_node_breaker_model_is_one_even_with_one_feeder(tmp_path):
+    network = cimtables.load_model(_write(tmp_path, (
+        'Object Substation: mRID=sub_a\n'
+        'Object Feeder: mRID=fdr_a, NormalEnergizingSubstation=sub_a\n'
+    )), model_cls=NodeBreakerModel)
+    assert type(network) is NodeBreakerModel
+    assert network.container is network.find_by_mRID('sub_a')
+
+
+def test_explicit_node_breaker_model_with_several_substations_has_no_container(tmp_path):
+    network = cimtables.load_model(_write(tmp_path, 'Table Substation: mRID\n    sub_a\n    sub_b\n'),
+                                   model_cls=NodeBreakerModel)
+    assert type(network) is NodeBreakerModel
+    assert network.container is None

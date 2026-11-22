@@ -22,7 +22,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "cim-graph", extras = ["sparql", "neo4j", "mysql", "gridappsd", "rdflib"], marker = "extra == 'all'" },
-    { name = "cim-profiles", specifier = ">=0.2.0a1,<0.3" },
+    { name = "cim-profiles", specifier = ">=0.2.0a6,<0.3" },
     { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "gridappsd-python", marker = "extra == 'gridappsd'", specifier = ">=2026.2.1" },
     { name = "mysql-connector-python", marker = "extra == 'mysql'", specifier = ">=9.2.0" },
