@@ -31,7 +31,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/PNNL-CIM-Tools/CIM-Tables"
-Documentation = "https://github.com/PNNL-CIM-Tools/CIM-Tables/blob/main/docs/CIMTBL_DESIGN.md"
+Documentation = "https://pnnl-cim-tools.github.io/CIM-Tables/"
 Repository = "https://github.com/PNNL-CIM-Tools/CIM-Tables"
 Issues = "https://github.com/PNNL-CIM-Tools/CIM-Tables/issues"
 Models = "https://github.com/PNNL-CIM-Tools/CIMTBL-Models"
@@ -39,6 +39,13 @@ Models = "https://github.com/PNNL-CIM-Tools/CIMTBL-Models"
 [dependency-groups]
 dev = [
     "pytest>=8.3.5",
+]
+# the GitHub Pages site (mkdocs.yml); mkdocs-jupyter's markdown_cell_processor needs Python 3.12+
+docs = [
+    "mkdocs-material>=9.7",
+    "mkdocs-jupyter>=0.27; python_version >= '3.12'",
+    "ipykernel>=6.29",
+    "nbconvert>=7.16",
 ]
 
 [tool.uv]
