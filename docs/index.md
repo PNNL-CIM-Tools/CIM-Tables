@@ -97,8 +97,8 @@ kilowatts; the model holds SI, as CIM does.
 
 ```mermaid
 flowchart LR
-    profiles["<b>cim-profiles</b><br/>CIM classes and units"] --> graph["<b>cim-graph</b><br/>the model in memory,<br/>CIM XML and JSON-LD"]
-    graph --> tables["<b>cimtables</b><br/>.cimtbl in and out"]
+    profiles["<b>cim-profiles</b><br/>CIM classes and units"] --> cimgraph["<b>cim-graph</b><br/>the model in memory,<br/>CIM XML and JSON-LD"]
+    cimgraph --> tables["<b>cimtables</b><br/>.cimtbl in and out"]
     tables --> builder["<b>CIM-Builder</b><br/>model builders"]
     tables --> hub["<b>CIMHub</b><br/>format converters"]
     models[("<b>CIMTBL-Models</b><br/>grid models<br/>in .cimtbl")] -.-> tables
